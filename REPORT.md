@@ -14,7 +14,7 @@ Notes: bottle threshold is 0.18 and book 0.20 so existing tests/behaviour are pr
 ## Results
 - `flutter analyze`: 1 info (`use_build_context_synchronously`, `lib/screens/lost_phone_screen.dart:82`) in a file I did not touch; no issues in changed files.
 - `flutter test`: all 74 tests pass (59 existing + 15 new).
-- Git: project folder is not a git repository, so nothing was committed.
+- Git: repository initialised and everything committed (`5556573`, "Add safe-reach guidance, fragile/nearby warnings, per-object found thresholds, new targets").
 
 ## TEST ON PHONE
 - [ ] Safe-reach after FOUND: slow voice "Found. Stop. Move your hand slowly forward, palm open." + long gentle vibration, spoken once
