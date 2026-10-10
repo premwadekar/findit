@@ -13,6 +13,7 @@ import '../services/localization_service.dart';
 import '../services/object_tracker.dart';
 import '../services/settings_service.dart';
 import '../services/speech_service.dart';
+import '../services/startup_guard.dart';
 import '../theme/app_theme.dart';
 import '../widgets/detection_overlay.dart';
 import 'found_screen.dart';
@@ -35,9 +36,10 @@ class FinderScreen extends StatefulWidget {
   State<FinderScreen> createState() => _FinderScreenState();
 }
 
-class _FinderScreenState extends State<FinderScreen> {
+class _FinderScreenState extends State<FinderScreen>
+    with WidgetsBindingObserver {
   CameraController? _camera;
-  final DetectionService _detections = DetectionService();
+  DetectionService _detections = DetectionService();
   final ObjectTracker _tracker = ObjectTracker();
   final SpeechService _speech = SpeechService();
   final HapticService _haptics = HapticService();
@@ -65,6 +67,8 @@ class _FinderScreenState extends State<FinderScreen> {
   DateTime _lastGuidanceSpoken = DateTime.fromMillisecondsSinceEpoch(0);
   HorizontalZone? _lastZone;
   bool _wasTracking = false;
+  StartupFailure _failure = StartupFailure.none;
+  AppLifecycleState? _lastLifecycle;
 
   AppLanguage get _lang => _settings.preferredLanguage;
   String get _targetModelLabel =>
@@ -79,24 +83,30 @@ class _FinderScreenState extends State<FinderScreen> {
       targetFriendlyName: _targetFriendly,
       language: _lang,
     );
+    WidgetsBinding.instance.addObserver(this);
     _boot();
   }
 
   Future<void> _boot() async {
+    CameraController? controller;
     try {
       final cam = await Permission.camera.request();
-      if (!cam.isGranted) {
-        setState(() {
-          _failed = true;
-          _status = 'Camera permission is required to find objects.';
-        });
-        await _speech.initialize(language: _lang);
-        _speech.speak('Camera permission is required to find objects.');
+      final denied = StartupGuard.permissionOutcome(
+        isGranted: cam.isGranted,
+        isPermanentlyDenied: cam.isPermanentlyDenied,
+      );
+      if (denied != StartupFailure.none) {
+        _showFailure(denied);
         return;
       }
 
       setState(() => _status = 'Loading on-device model...');
-      await _detections.initialize();
+      try {
+        await _detections.initialize();
+      } catch (_) {
+        _showFailure(StartupFailure.modelLoad);
+        return;
+      }
       final langResult = await _speech.initialize(language: _lang);
       if (langResult != null && !langResult.isSupported && _lang != AppLanguage.english) {
         _settings.setPreferredLanguage(AppLanguage.english);
@@ -107,19 +117,33 @@ class _FinderScreenState extends State<FinderScreen> {
       }
       await _haptics.initialize();
 
-      final cameras = await availableCameras();
+      List<CameraDescription> cameras;
+      try {
+        cameras = await availableCameras();
+      } catch (_) {
+        cameras = const [];
+      }
+      if (cameras.isEmpty) {
+        _showFailure(StartupFailure.noCamera);
+        return;
+      }
       final back = cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
 
-      final controller = CameraController(
+      controller = CameraController(
         back,
         ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
-      await controller.initialize();
+      try {
+        await controller.initialize();
+      } catch (_) {
+        _showFailure(StartupFailure.cameraInit);
+        return;
+      }
 
       if (!mounted) {
         await controller.dispose();
@@ -127,6 +151,7 @@ class _FinderScreenState extends State<FinderScreen> {
       }
 
       _camera = controller;
+      controller = null; // now owned by _camera (disposed in dispose/_retry)
       _sub = _detections.results.listen(_onResults);
 
       _searchStartTime = DateTime.now();
@@ -137,14 +162,82 @@ class _FinderScreenState extends State<FinderScreen> {
       });
 
       await _speech.speak(startPhrase, urgent: true);
-      await controller.startImageStream(_onImage);
-    } catch (e) {
+      await _camera!.startImageStream(_onImage);
+    } catch (_) {
+      await controller?.dispose();
       if (!mounted) return;
-      setState(() {
-        _failed = true;
-        _status = 'Startup failed: $e';
-      });
+      _showFailure(StartupFailure.cameraInit);
     }
+  }
+
+  /// Shows a localized, spoken explanation and switches to the error screen,
+  /// which offers the actions that can actually fix this failure.
+  void _showFailure(StartupFailure failure) {
+    if (!mounted) return;
+    final lang = _lang;
+    final message = switch (failure) {
+      StartupFailure.permissionDenied => _l10n.cameraPermissionNeeded(lang),
+      StartupFailure.permissionPermanentlyDenied => _l10n.cameraPermissionBlocked(lang),
+      StartupFailure.noCamera => _l10n.noCameraFound(lang),
+      StartupFailure.modelLoad => _l10n.modelLoadFailed(lang),
+      _ => _l10n.cameraStartFailed(lang),
+    };
+    setState(() {
+      _failed = true;
+      _failure = failure;
+      _scanning = false;
+      _status = message;
+    });
+    () async {
+      await _speech.initialize(language: lang);
+      await _speech.speak(message, urgent: true);
+    }();
+  }
+
+  /// Tears down the failed attempt and boots again (new detector, new camera).
+  void _retry() {
+    _camera?.dispose().catchError((_) {});
+    _camera = null;
+    _sub?.cancel();
+    _sub = null;
+    _detections.dispose();
+    _detections = DetectionService();
+    setState(() {
+      _failed = false;
+      _failure = StartupFailure.none;
+      _status = 'Starting camera and vision system...';
+    });
+    _boot();
+  }
+
+  /// Stops the camera stream when the app is hidden and restarts it on return.
+  /// If the OS took the camera away, a full retry is used instead.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final previous = _lastLifecycle ?? AppLifecycleState.resumed;
+    _lastLifecycle = state;
+    final action = StartupGuard.lifecycleAction(previous, state);
+
+    if (action == LifecycleAction.pauseCamera) {
+      _camera?.stopImageStream().catchError((_) {});
+      return;
+    }
+    if (action != LifecycleAction.resumeCamera) return;
+
+    // Back in front: the permission may have been granted in app settings.
+    if (_failed) {
+      if (StartupGuard.offersSettingsButton(_failure)) _retry();
+      return;
+    }
+    final camera = _camera;
+    if (camera == null || !_scanning) return;
+    if (!camera.value.isInitialized) {
+      _retry();
+      return;
+    }
+    camera
+        .startImageStream(_onImage)
+        .catchError((_) => _showFailure(StartupFailure.cameraInit));
   }
 
   void _onImage(CameraImage image) {
@@ -215,6 +308,7 @@ class _FinderScreenState extends State<FinderScreen> {
         _lastScanRoomPrompt = now;
         final scanMsg = _l10n.scanRoom(_lang);
         await _speech.speak(scanMsg);
+        if (!mounted) return;
         setState(() => _status = scanMsg);
         return;
       }
@@ -317,6 +411,7 @@ class _FinderScreenState extends State<FinderScreen> {
       }
     }
 
+    if (!mounted) return;
     setState(() {
       _latest = frame.detections;
       _tracked = tracked;
@@ -380,6 +475,7 @@ class _FinderScreenState extends State<FinderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     _camera?.stopImageStream().catchError((_) {});
     _camera?.dispose();
@@ -923,30 +1019,63 @@ class _FinderScreenState extends State<FinderScreen> {
     Proximity.veryClose => 'Right in front of your hands!',
   };
 
-  Widget _errorBody() => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: AppTheme.error,
-            size: 64,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _status,
-            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 18),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('BACK TO HOME'),
-          ),
-        ],
+  Widget _errorBody() {
+    final lang = _lang;
+    final canOpenSettings = StartupGuard.offersSettingsButton(_failure);
+    final canRetry = StartupGuard.offersRetry(_failure);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.error_outline_rounded,
+              color: AppTheme.error,
+              size: 64,
+            ),
+            const SizedBox(height: 16),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                _status,
+                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 18),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 24),
+            if (canOpenSettings) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => openAppSettings(),
+                  icon: const Icon(Icons.settings_rounded),
+                  label: Text(_l10n.openAppSettings(lang)),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (canRetry) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _retry,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text(_l10n.tryAgain(lang)),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('BACK TO HOME'),
+              ),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }

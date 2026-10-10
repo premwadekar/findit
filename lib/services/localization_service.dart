@@ -835,4 +835,96 @@ class LocalizationService {
     AppLanguage.tamil =>
         'ஐரிஸ் திரையை இயக்க FindIt க்கான முழுத்திரை அறிவிப்புகளை அனுமதியுங்கள்.',
   };
+
+  // ---- Startup robustness (camera, model, permission) ----
+  String cameraPermissionNeeded(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'FindIt needs camera permission to find objects. Allow it to continue.',
+    AppLanguage.hindi =>
+        'वस्तुएँ खोजने के लिए FindIt को कैमरे की अनुमति चाहिए। जारी रखने के लिए इसे अनुमति दें।',
+    AppLanguage.kannada =>
+        'ವಸ್ತುಗಳನ್ನು ಹುಡುಕಲು FindIt ಗೆ ಕ್ಯಾಮೆರಾ ಅನುಮತಿ ಬೇಕು. ಮುಂದುವರಿಯಲು ಅದನ್ನು ಅನುಮತಿಸಿ.',
+    AppLanguage.telugu =>
+        'వస్తువులను వెతకడానికి FindIt కు కెమెరా అనుమతి కావాలి. కొనసాగించడానికి అనుమతించండి.',
+    AppLanguage.tamil =>
+        'பொருட்களைத் தேட FindIt க்கு கேமரா அனுமதி தேவை. தொடர அனுமதியுங்கள்.',
+  };
+
+  String cameraPermissionBlocked(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Camera permission is turned off for FindIt. Open app settings and allow the camera.',
+    AppLanguage.hindi =>
+        'FindIt के लिए कैमरे की अनुमति बंद है। ऐप सेटिंग्स खोलकर कैमरा अनुमति दें।',
+    AppLanguage.kannada =>
+        'FindIt ಗಾಗಿ ಕ್ಯಾಮೆರಾ ಅನುಮತಿ ಆಫ್ ಆಗಿದೆ. ಅಪ್ಲಿಕೇಶನ್ ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ತೆರೆದು ಕ್ಯಾಮೆರಾ ಅನುಮತಿಸಿ.',
+    AppLanguage.telugu =>
+        'FindIt க்கான கேமரா அனுமதி அணைக்கப்பட்டுள்ளது. ஆப் அமைப்புகளைத் திறந்து கேமராவை அனுமதியுங்கள்.',
+    AppLanguage.tamil =>
+        'FindIt కోసం కెమెరా అనుమతి ఆఫ్‌లో ఉంది. యాప్ సెట్టింగ్‌లు తెరిచి కెమెరాను అనుమతించండి.',
+  };
+
+  String noCameraFound(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'No camera was found on this phone, so FindIt cannot look for objects.',
+    AppLanguage.hindi =>
+        'इस फ़ोन में कोई कैमरा नहीं मिला, इसलिए FindIt वस्तुएँ नहीं खोज सकता।',
+    AppLanguage.kannada =>
+        'ಈ ಫೋನ್‌ನಲ್ಲಿ ಕ್ಯಾಮೆರಾ ಸಿಗಲಿಲ್ಲ, ಆದ್ದರಿಂದ FindIt ವಸ್ತುಗಳನ್ನು ಹುಡುಕಲಾರದು.',
+    AppLanguage.telugu =>
+        'ఈ ఫోన్‌లో కెమెరా కనిపించలేదు, కాబట్టి FindIt వస్తువులను వెతకలేదు.',
+    AppLanguage.tamil =>
+        'இந்த போனில் கேமரா இல்லை, எனவே FindIt பொருட்களைத் தேட முடியாது.',
+  };
+
+  String cameraStartFailed(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'The camera could not start. Close other camera apps and try again.',
+    AppLanguage.hindi =>
+        'कैमरा शुरू नहीं हो सका। दूसरे कैमरा ऐप बंद करके फिर से कोशिश करें।',
+    AppLanguage.kannada =>
+        'ಕ್ಯಾಮೆರಾ ಪ್ರಾರಂಭವಾಗಲಿಲ್ಲ. ಇತರ ಕ್ಯಾಮೆರಾ ಅಪ್ಲಿಕೇಶನ್‌ಗಳನ್ನು ಮುಚ್ಚಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
+    AppLanguage.telugu =>
+        'కెమెరా ప్రారంభం కాలేదు. ఇతర కెమెరా యాప్‌లను మూసివేసి మళ్లీ ప్రయత్నించండి.',
+    AppLanguage.tamil =>
+        'கேமரா தொடங்கவில்லை. மற்ற கேமரா ஆப்ஸை மூடிவிட்டு மீண்டும் முயலுங்கள்.',
+  };
+
+  String modelLoadFailed(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'The object detector could not load. Restart FindIt to try again.',
+    AppLanguage.hindi =>
+        'वस्तु पहचानने वाला मॉडल लोड नहीं हो सका। फिर से कोशिश करने के लिए FindIt दोबारा शुरू करें।',
+    AppLanguage.kannada =>
+        'ವಸ್ತು ಪತ್ತೆಕಾರಕ ಲೋಡ್ ಆಗಲಿಲ್ಲ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಲು FindIt ಅನ್ನು ಮರುಪ್ರಾರಂಭಿಸಿ.',
+    AppLanguage.telugu =>
+        'వస్తువు గుర్తింపు యంత్రం లోడ్ కాలేదు. మళ్లీ ప్రయత్నించడానికి FindIt ను పునఃప్రారంభించండి.',
+    AppLanguage.tamil =>
+        'பொருள் கண்டறியும் கருவி ஏற்றப்படவில்லை. மீண்டும் முயல FindIt ஐ மறுதொடக்கம் செய்யுங்கள்.',
+  };
+
+  String openAppSettings(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Open app settings',
+    AppLanguage.hindi =>
+        'ऐप सेटिंग्स खोलें',
+    AppLanguage.kannada =>
+        'ಅಪ್ಲಿಕೇಶನ್ ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ತೆರೆಯಿರಿ',
+    AppLanguage.telugu =>
+        'యాప్ సెట్టింగ్‌లు తెరవండి',
+    AppLanguage.tamil =>
+        'ஆப் அமைப்புகளைத் திறக்கவும்',
+  };
+
+  String tryAgain(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Try again',
+    AppLanguage.hindi =>
+        'फिर से कोशिश करें',
+    AppLanguage.kannada =>
+        'ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ',
+    AppLanguage.telugu =>
+        'మళ్లీ ప్రయత్నించండి',
+    AppLanguage.tamil =>
+        'மீண்டும் முயலுங்கள்',
+  };
 }

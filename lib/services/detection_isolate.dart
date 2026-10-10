@@ -24,8 +24,17 @@ void detectionIsolateEntry(SendPort mainPort) {
   List<String>? labels;
 
   inbox.listen((Object? message) {
-    final msg = message as Map<String, Object?>;
-    switch (msg['type'] as String) {
+    if (message is! Map<String, Object?>) return;
+    final msg = message;
+    switch (msg['type'] as String? ?? '') {
+      case 'close':
+        // Release the native TFLite interpreter before the isolate exits.
+        try {
+          interpreter?.close();
+        } catch (_) {}
+        interpreter = null;
+        inbox.close();
+        Isolate.exit();
       case 'init':
         try {
           interpreter = Interpreter.fromBuffer(msg['model'] as Uint8List);

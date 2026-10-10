@@ -42,23 +42,33 @@ class DetectionService {
   Stream<DetectionFrame> get results => _results.stream;
   Future<void> get ready => _ready.future;
 
+  /// Loads the model in the background isolate. Completes only once the model
+  /// is really ready; throws if loading fails or takes too long, so the caller
+  /// can show an error instead of silently detecting nothing.
   Future<void> initialize() async {
-    final modelBytes = (await rootBundle.load(
-      'assets/models/detect.tflite',
-    )).buffer.asUint8List();
-    final labelText = await rootBundle.loadString('assets/models/labelmap.txt');
-    final labels = labelText
-        .split('\n')
-        .map((l) => l.trim())
-        .where((l) => l.isNotEmpty)
-        .toList();
+    if (_isolate != null || _disposed) return;
+    try {
+      final modelBytes = (await rootBundle.load(
+        'assets/models/detect.tflite',
+      )).buffer.asUint8List();
+      final labelText = await rootBundle.loadString('assets/models/labelmap.txt');
+      final labels = labelText
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .toList();
 
-    _port = ReceivePort();
-    _port!.listen(_onMessage);
-    _isolate = await Isolate.spawn(detectionIsolateEntry, _port!.sendPort);
-    // The isolate replies first with its inbox SendPort, then accepts 'init'.
-    // We stash init args until the inbox arrives (handled in _onMessage).
-    _pendingInit = {'model': modelBytes, 'labels': labels};
+      _port = ReceivePort();
+      _port!.listen(_onMessage);
+      _isolate = await Isolate.spawn(detectionIsolateEntry, _port!.sendPort);
+      // The isolate replies first with its inbox SendPort, then accepts 'init'.
+      // We stash init args until the inbox arrives (handled in _onMessage).
+      _pendingInit = {'model': modelBytes, 'labels': labels};
+      await ready.timeout(const Duration(seconds: 20));
+    } catch (e) {
+      dispose();
+      rethrow;
+    }
   }
 
   Map<String, Object>? _pendingInit;
@@ -73,16 +83,23 @@ class DetectionService {
       }
       return;
     }
-    final msg = message as Map<String, Object?>;
-    switch (msg['type'] as String) {
+    if (message is! Map<String, Object?>) return;
+    final msg = message;
+    switch (msg['type'] as String? ?? '') {
       case 'ready':
         if (!_ready.isCompleted) _ready.complete();
       case 'error':
+        // Init failed inside the isolate: surface it to initialize().
         _busy = false;
+        if (!_ready.isCompleted) {
+          _ready.completeError(StateError(msg['error']?.toString() ?? 'model load failed'));
+        }
       case 'result':
         _busy = false;
         if (_disposed) return;
-        final dets = ((msg['dets'] as List).cast<List>())
+        final rawDets = msg['dets'] as List? ?? const [];
+        final dets = rawDets
+            .cast<List>()
             .map((w) => Detection.fromWire(w.cast<Object?>()))
             .toList();
         _results.add(
@@ -132,11 +149,24 @@ class DetectionService {
     });
   }
 
+  /// Asks the isolate to close the TFLite interpreter (native memory) and exit.
+  /// Killing it outright would skip that cleanup, so the kill is only a
+  /// fallback if the isolate has not exited within a few seconds.
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
-    _isolate?.kill(priority: Isolate.immediate);
+    final isolate = _isolate;
     _isolate = null;
+    final inbox = _isolateInbox;
+    _isolateInbox = null;
+    if (inbox != null && isolate != null) {
+      inbox.send({'type': 'close'});
+      Timer(const Duration(seconds: 3), () => isolate.kill(priority: Isolate.immediate));
+    } else {
+      isolate?.kill(priority: Isolate.immediate);
+    }
     _port?.close();
+    _port = null;
     _results.close();
   }
 }

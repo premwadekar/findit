@@ -253,6 +253,7 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() => _statusText = msg);
       await _speech.speak(msg, urgent: true);
       await _lostPhone.testAlarm();
+      if (!mounted) return;
       _navigateToLostPhone();
       return;
     }
