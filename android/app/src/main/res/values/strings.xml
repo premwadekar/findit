@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="iris_a11y_label">FindIt Iris trigger</string>
+    <string name="iris_a11y_description">Used only to detect a long press of the Volume Up button so you can start the Iris voice assistant, even when the screen is off. FindIt does not read your screen or any content, and nothing is stored or sent.</string>
+</resources>

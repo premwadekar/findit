@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="iris_a11y_label">FindIt आइरिस ट्रिगर</string>
+    <string name="iris_a11y_description">इसका उपयोग केवल वॉल्यूम अप बटन को देर तक दबाने का पता लगाने के लिए होता है, ताकि स्क्रीन बंद होने पर भी आप आइरिस वॉइस असिस्टेंट शुरू कर सकें। FindIt आपकी स्क्रीन या कोई सामग्री नहीं पढ़ता, और कुछ भी सहेजा या भेजा नहीं जाता।</string>
+</resources>

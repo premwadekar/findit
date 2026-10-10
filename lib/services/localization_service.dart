@@ -626,4 +626,213 @@ class LocalizationService {
     AppLanguage.tamil =>
       'சுற்றுப்புற விவரிப்பு இன்னும் கிடைக்கவில்லை. ஒரு குறிப்பிட்ட பொருளை நான் தேடித் தர முடியும்.',
   };
+
+  // ---- Iris hands-free trigger (long press, screen wake) ----
+  String handsFreeTitle(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Hands-free trigger',
+    AppLanguage.hindi =>
+        'हैंड्स-फ़्री ट्रिगर',
+    AppLanguage.kannada =>
+        'ಹ್ಯಾಂಡ್ಸ್-ಫ್ರೀ ಟ್ರಿಗರ್',
+    AppLanguage.telugu =>
+        'హ్యాండ్స్-ఫ్రీ ట్రిగ్గర్',
+    AppLanguage.tamil =>
+        'கைகள் இல்லா தூண்டுதல்',
+  };
+
+  String handsFreeExplain(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Hold Volume Up for about one second to wake Iris, even when the screen is off. This needs the FindIt Iris trigger turned on in Accessibility settings. It only detects a long press of Volume Up. It does not read your screen, and nothing is stored or sent.',
+    AppLanguage.hindi =>
+        'स्क्रीन बंद होने पर भी आइरिस को जगाने के लिए वॉल्यूम अप को लगभग एक सेकंड दबाए रखें। इसके लिए एक्सेसिबिलिटी सेटिंग्स में FindIt आइरिस ट्रिगर चालू होना चाहिए। यह केवल वॉल्यूम अप का लंबा दबाव पहचानता है। यह आपकी स्क्रीन नहीं पढ़ता, और कुछ भी सहेजा या भेजा नहीं जाता।',
+    AppLanguage.kannada =>
+        'ಪರದೆ ಆಫ್ ಆಗಿದ್ದರೂ ಐರಿಸ್ ಅನ್ನು ಎಬ್ಬಿಸಲು ವಾಲ್ಯೂಮ್ ಅಪ್ ಅನ್ನು ಸುಮಾರು ಒಂದು ಸೆಕೆಂಡ್ ಒತ್ತಿ ಹಿಡಿಯಿರಿ. ಇದಕ್ಕೆ ಪ್ರವೇಶಸಾಧ್ಯತೆ ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ FindIt ಐರಿಸ್ ಟ್ರಿಗರ್ ಆನ್ ಆಗಿರಬೇಕು. ಇದು ವಾಲ್ಯೂಮ್ ಅಪ್‌ನ ದೀರ್ಘ ಒತ್ತುವಿಕೆಯನ್ನು ಮಾತ್ರ ಗುರುತಿಸುತ್ತದೆ. ಇದು ನಿಮ್ಮ ಪರದೆಯನ್ನು ಓದುವುದಿಲ್ಲ, ಮತ್ತು ಏನನ್ನೂ ಉಳಿಸಲಾಗುವುದಿಲ್ಲ ಅಥವಾ ಕಳುಹಿಸಲಾಗುವುದಿಲ್ಲ.',
+    AppLanguage.telugu =>
+        'స్క్రీన్ ఆఫ్‌లో ఉన్నా ఐరిస్‌ను మేల్కొలపడానికి వాల్యూమ్ అప్‌ను సుమారు ఒక సెకను నొక్కి ఉంచండి. దీనికి యాక్సెసిబిలిటీ సెట్టింగ్‌లలో FindIt ఐరిస్ ట్రిగ్గర్ ఆన్‌లో ఉండాలి. ఇది వాల్యూమ్ అప్ ఎక్కువసేపు నొక్కడాన్ని మాత్రమే గుర్తిస్తుంది. ఇది మీ స్క్రీన్‌ను చదవదు, ఏదీ నిల్వ చేయబడదు లేదా పంపబడదు.',
+    AppLanguage.tamil =>
+        'திரை அணைந்திருந்தாலும் ஐரிஸை எழுப்ப வால்யூம் அப்பை சுமார் ஒரு வினாடி அழுத்திப் பிடியுங்கள். இதற்கு அணுகல்தன்மை அமைப்புகளில் FindIt ஐரிஸ் தூண்டுதல் இயக்கப்பட்டிருக்க வேண்டும். இது வால்யூம் அப்பின் நீண்ட அழுத்தத்தை மட்டுமே கண்டறியும். இது உங்கள் திரையைப் படிக்காது, எதுவும் சேமிக்கப்படாது அல்லது அனுப்பப்படாது.',
+  };
+
+  String accessibilityStatusOn(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Accessibility trigger: ON',
+    AppLanguage.hindi =>
+        'एक्सेसिबिलिटी ट्रिगर: चालू',
+    AppLanguage.kannada =>
+        'ಪ್ರವೇಶಸಾಧ್ಯತೆ ಟ್ರಿಗರ್: ಆನ್',
+    AppLanguage.telugu =>
+        'యాక్సెసిబిలిటీ ట్రిగ్గర్: ఆన్',
+    AppLanguage.tamil =>
+        'அணுகல்தன்மை தூண்டுதல்: இயக்கத்தில்',
+  };
+
+  String accessibilityStatusOff(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Accessibility trigger: OFF',
+    AppLanguage.hindi =>
+        'एक्सेसिबिलिटी ट्रिगर: बंद',
+    AppLanguage.kannada =>
+        'ಪ್ರವೇಶಸಾಧ್ಯತೆ ಟ್ರಿಗರ್: ಆಫ್',
+    AppLanguage.telugu =>
+        'యాక్సెసిబిలిటీ ట్రిగ్గర్: ఆఫ్',
+    AppLanguage.tamil =>
+        'அணுகல்தன்மை தூண்டுதல்: அணைந்துள்ளது',
+  };
+
+  String screenWakeStatusOn(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Screen wake over lock screen: allowed',
+    AppLanguage.hindi =>
+        'लॉक स्क्रीन पर स्क्रीन जगाना: अनुमति है',
+    AppLanguage.kannada =>
+        'ಲಾಕ್ ಸ್ಕ್ರೀನ್ ಮೇಲೆ ಪರದೆ ಎಬ್ಬಿಸುವುದು: ಅನುಮತಿಸಲಾಗಿದೆ',
+    AppLanguage.telugu =>
+        'లాక్ స్క్రీన్‌పై స్క్రీన్ ఆన్ చేయడం: అనుమతించబడింది',
+    AppLanguage.tamil =>
+        'பூட்டுத் திரையில் திரையை எழுப்புதல்: அனுமதிக்கப்பட்டது',
+  };
+
+  String screenWakeStatusOff(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Screen wake over lock screen: not allowed',
+    AppLanguage.hindi =>
+        'लॉक स्क्रीन पर स्क्रीन जगाना: अनुमति नहीं है',
+    AppLanguage.kannada =>
+        'ಲಾಕ್ ಸ್ಕ್ರೀನ್ ಮೇಲೆ ಪರದೆ ಎಬ್ಬಿಸುವುದು: ಅನುಮತಿ ಇಲ್ಲ',
+    AppLanguage.telugu =>
+        'లాక్ స్క్రీన్‌పై స్క్రీన్ ఆన్ చేయడం: అనుమతి లేదు',
+    AppLanguage.tamil =>
+        'பூட்டுத் திரையில் திரையை எழுப்புதல்: அனுமதி இல்லை',
+  };
+
+  String openAccessibilitySettings(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Open Accessibility settings',
+    AppLanguage.hindi =>
+        'एक्सेसिबिलिटी सेटिंग्स खोलें',
+    AppLanguage.kannada =>
+        'ಪ್ರವೇಶಸಾಧ್ಯತೆ ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ತೆರೆಯಿರಿ',
+    AppLanguage.telugu =>
+        'యాక్సెసిబిలిటీ సెట్టింగ్‌లను తెరవండి',
+    AppLanguage.tamil =>
+        'அணுகல்தன்மை அமைப்புகளைத் திறக்கவும்',
+  };
+
+  String allowScreenWake(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Allow screen wake',
+    AppLanguage.hindi =>
+        'स्क्रीन जगाने की अनुमति दें',
+    AppLanguage.kannada =>
+        'ಪರದೆ ಎಬ್ಬಿಸಲು ಅನುಮತಿಸಿ',
+    AppLanguage.telugu =>
+        'స్క్రీన్ ఆన్ చేయడానికి అనుమతించండి',
+    AppLanguage.tamil =>
+        'திரையை எழுப்ப அனுமதிக்கவும்',
+  };
+
+  String longPressNeedsAccessibility(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Long press needs Accessibility turned on.',
+    AppLanguage.hindi =>
+        'देर तक दबाने के लिए एक्सेसिबिलिटी चालू करना ज़रूरी है।',
+    AppLanguage.kannada =>
+        'ದೀರ್ಘ ಒತ್ತುವಿಕೆಗೆ ಪ್ರವೇಶಸಾಧ್ಯತೆ ಆನ್ ಆಗಿರಬೇಕು.',
+    AppLanguage.telugu =>
+        'ఎక్కువసేపు నొక్కడానికి యాక్సెసిబిలిటీ ఆన్‌లో ఉండాలి.',
+    AppLanguage.tamil =>
+        'நீண்ட அழுத்தத்திற்கு அணுகல்தன்மை இயக்கப்பட்டிருக்க வேண்டும்.',
+  };
+
+  String screenWakeNeedsPermission(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Iris cannot turn the screen on until you allow full-screen notifications.',
+    AppLanguage.hindi =>
+        'जब तक आप फ़ुल-स्क्रीन नोटिफ़िकेशन की अनुमति नहीं देते, आइरिस स्क्रीन चालू नहीं कर सकता।',
+    AppLanguage.kannada =>
+        'ಪೂರ್ಣ-ಪರದೆ ಅಧಿಸೂಚನೆಗಳನ್ನು ನೀವು ಅನುಮತಿಸುವವರೆಗೆ ಐರಿಸ್ ಪರದೆಯನ್ನು ಆನ್ ಮಾಡಲಾರದು.',
+    AppLanguage.telugu =>
+        'మీరు ఫుల్-స్క్రీన్ నోటిఫికేషన్‌లను అనుమతించే వరకు ఐరిస్ స్క్రీన్‌ను ఆన్ చేయలేదు.',
+    AppLanguage.tamil =>
+        'முழுத்திரை அறிவிப்புகளை நீங்கள் அனுமதிக்கும் வரை ஐரிஸ் திரையை இயக்க முடியாது.',
+  };
+
+  String handsFreeGuide(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'To use Iris with the screen off: first, turn on FindIt Iris trigger in Accessibility settings. Second, allow full-screen notifications. You can skip this and set it up later.',
+    AppLanguage.hindi =>
+        'स्क्रीन बंद होने पर आइरिस का उपयोग करने के लिए: पहले, एक्सेसिबिलिटी सेटिंग्स में FindIt आइरिस ट्रिगर चालू करें। दूसरा, फ़ुल-स्क्रीन नोटिफ़िकेशन की अनुमति दें। आप इसे छोड़कर बाद में भी कर सकते हैं।',
+    AppLanguage.kannada =>
+        'ಪರದೆ ಆಫ್ ಆಗಿರುವಾಗ ಐರಿಸ್ ಬಳಸಲು: ಮೊದಲು, ಪ್ರವೇಶಸಾಧ್ಯತೆ ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ FindIt ಐರಿಸ್ ಟ್ರಿಗರ್ ಆನ್ ಮಾಡಿ. ಎರಡನೆಯದಾಗಿ, ಪೂರ್ಣ-ಪರದೆ ಅಧಿಸೂಚನೆಗಳನ್ನು ಅನುಮತಿಸಿ. ನೀವು ಇದನ್ನು ಬಿಟ್ಟು ನಂತರ ಹೊಂದಿಸಬಹುದು.',
+    AppLanguage.telugu =>
+        'స్క్రీన్ ఆఫ్‌లో ఐరిస్ వాడటానికి: మొదట, యాక్సెసిబిలిటీ సెట్టింగ్‌లలో FindIt ఐరిస్ ట్రిగ్గర్ ఆన్ చేయండి. రెండవది, ఫుల్-స్క్రీన్ నోటిఫికేషన్‌లను అనుమతించండి. మీరు దీన్ని వదిలేసి తర్వాత సెట్ చేసుకోవచ్చు.',
+    AppLanguage.tamil =>
+        'திரை அணைந்திருக்கும்போது ஐரிஸைப் பயன்படுத்த: முதலில், அணுகல்தன்மை அமைப்புகளில் FindIt ஐரிஸ் தூண்டுதலை இயக்குங்கள். இரண்டாவது, முழுத்திரை அறிவிப்புகளை அனுமதியுங்கள். இதைத் தவிர்த்து பின்னர் அமைக்கலாம்.',
+  };
+
+  String skipForNow(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Skip for now',
+    AppLanguage.hindi =>
+        'अभी छोड़ें',
+    AppLanguage.kannada =>
+        'ಈಗ ಬಿಡಿ',
+    AppLanguage.telugu =>
+        'ఇప్పుడు వదిలేయండి',
+    AppLanguage.tamil =>
+        'இப்போது தவிர்க்கவும்',
+  };
+
+  String hearExplanation(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Hear explanation',
+    AppLanguage.hindi =>
+        'समझाइश सुनें',
+    AppLanguage.kannada =>
+        'ವಿವರಣೆ ಕೇಳಿ',
+    AppLanguage.telugu =>
+        'వివరణ వినండి',
+    AppLanguage.tamil =>
+        'விளக்கத்தைக் கேளுங்கள்',
+  };
+
+  String irisListeningTitle(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Iris is listening',
+    AppLanguage.hindi =>
+        'आइरिस सुन रहा है',
+    AppLanguage.kannada =>
+        'ಐರಿಸ್ ಕೇಳುತ್ತಿದೆ',
+    AppLanguage.telugu =>
+        'ఐరిస్ వింటోంది',
+    AppLanguage.tamil =>
+        'ஐரிஸ் கேட்கிறது',
+  };
+
+  String fsiNotifTitle(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Iris needs permission to wake the screen',
+    AppLanguage.hindi =>
+        'स्क्रीन जगाने के लिए आइरिस को अनुमति चाहिए',
+    AppLanguage.kannada =>
+        'ಪರದೆ ಎಬ್ಬಿಸಲು ಐರಿಸ್‌ಗೆ ಅನುಮತಿ ಬೇಕು',
+    AppLanguage.telugu =>
+        'స్క్రీన్ ఆన్ చేయడానికి ఐరిస్‌కు అనుమతి కావాలి',
+    AppLanguage.tamil =>
+        'திரையை எழுப்ப ஐரிஸுக்கு அனுமதி தேவை',
+  };
+
+  String fsiNotifText(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+        'Allow full-screen notifications for FindIt so Iris can turn the screen on.',
+    AppLanguage.hindi =>
+        'FindIt के लिए फ़ुल-स्क्रीन नोटिफ़िकेशन की अनुमति दें ताकि आइरिस स्क्रीन चालू कर सके।',
+    AppLanguage.kannada =>
+        'ಐರಿಸ್ ಪರದೆ ಆನ್ ಮಾಡಲು FindIt ಗಾಗಿ ಪೂರ್ಣ-ಪರದೆ ಅಧಿಸೂಚನೆಗಳನ್ನು ಅನುಮತಿಸಿ.',
+    AppLanguage.telugu =>
+        'ఐరిస్ స్క్రీన్ ఆన్ చేయడానికి FindIt కోసం ఫుల్-స్క్రీన్ నోటిఫికేషన్‌లను అనుమతించండి.',
+    AppLanguage.tamil =>
+        'ஐரிஸ் திரையை இயக்க FindIt க்கான முழுத்திரை அறிவிப்புகளை அனுமதியுங்கள்.',
+  };
 }

@@ -1,7 +1,9 @@
 package com.findit.findit
 
 import android.content.Intent
+import android.app.NotificationManager
 import android.os.BatteryManager
+import android.provider.Settings
 import android.os.Build
 import android.os.Bundle
 import android.content.Context
@@ -132,6 +134,20 @@ class MainActivity : FlutterActivity() {
                             result.success(false)
                         }
                     }
+                    "getHandsFreeStatus" -> {
+                        result.success(
+                            mapOf(
+                                "accessibility" to isIrisAccessibilityEnabled(),
+                                "fullScreen" to LostPhoneService.canUseFullScreenIntent(this@MainActivity)
+                            )
+                        )
+                    }
+                    "openAccessibilitySettings" -> {
+                        result.success(openSettings(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                    }
+                    "openFullScreenSettings" -> {
+                        result.success(openSettings(LostPhoneService.fullScreenSettingsIntent(this@MainActivity)))
+                    }
                     "takePendingCommand" -> {
                         result.success(LostPhoneService.takePendingCommand())
                     }
@@ -220,6 +236,43 @@ class MainActivity : FlutterActivity() {
                 override fun notImplemented() {}
             }
         )
+    }
+
+    /** True when the user has switched on the "FindIt Iris trigger" accessibility service. */
+    private fun isIrisAccessibilityEnabled(): Boolean {
+        return try {
+            if (IrisAccessibilityService.isConnected) return true
+            val enabled = Settings.Secure.getInt(contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1
+            if (!enabled) return false
+            val list = Settings.Secure.getString(
+                contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: return false
+            val component = android.content.ComponentName(this, IrisAccessibilityService::class.java)
+            list.split(':').any {
+                val c = android.content.ComponentName.unflattenFromString(it)
+                c != null && c == component
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun openSettings(intent: Intent): Boolean {
+        return try {
+            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The app is in front: the screen-wake notification has done its job.
+        try {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .cancel(LostPhoneService.WAKE_NOTIFICATION_ID)
+        } catch (_: Exception) {}
     }
 
     private fun configBundle(map: Map<String, String>?): Bundle {

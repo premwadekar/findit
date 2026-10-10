@@ -19,6 +19,7 @@ import android.media.VolumeProvider
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.Uri
+import android.provider.Settings
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
@@ -62,6 +63,33 @@ class LostPhoneService : Service() {
         @Volatile
         var instance: LostPhoneService? = null
             private set
+
+        const val WAKE_CHANNEL_ID = "findit_iris_wake_channel"
+        const val WAKE_NOTIFICATION_ID = 9022
+        private const val SCREEN_WAKE_MS = 5000L
+        private const val WAKE_NOTIFICATION_CLEAR_MS = 15000L
+
+        /** Android 14+ can revoke full-screen notifications; earlier versions always allow them. */
+        fun canUseFullScreenIntent(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true
+            return try {
+                (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                    .canUseFullScreenIntent()
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        /** Settings page where the user can allow full-screen notifications for this app. */
+        fun fullScreenSettingsIntent(context: Context): Intent {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + context.packageName))
+            } else {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            }
+            return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
 
         // A command that Dart has not acknowledged yet (e.g. app cold-starting
         // from the screen-off state). Dart pulls it once its handler exists.
@@ -169,6 +197,7 @@ class LostPhoneService : Service() {
     private var lastTriggerMs: Long = -TRIGGER_COOLDOWN_MS
     private val volumeDetector = DoublePressDetector()
     private var mediaSession: MediaSession? = null
+    private var screenWakeLock: PowerManager.WakeLock? = null
 
     /** Nothing was heard within the command window: say so, then go idle. */
     private val commandTimeoutRunnable = Runnable {
@@ -639,17 +668,17 @@ class LostPhoneService : Service() {
      * Flow: beep + vibrate -> pause wake-word loop -> "Yes, tell me" ->
      * listen for ONE command (8 s) -> deliver to Dart -> idle.
      */
-    private fun beginIrisSession(source: String, directCommand: String? = null) {
-        if (!isRunning) return
+    private fun beginIrisSession(source: String, directCommand: String? = null): Boolean {
+        if (!isRunning) return false
         if (isAlarmRinging) {
             // Any trigger while the alarm sounds silences it first.
             stopAlarm()
-            return
+            return true
         }
         val now = SystemClock.uptimeMillis()
         if (irisSessionActive || now - lastTriggerMs < TRIGGER_COOLDOWN_MS) {
             Log.i(TAG, "Iris trigger from '$source' ignored (debounced).")
-            return
+            return false
         }
         lastTriggerMs = now
         irisSessionActive = true
@@ -664,6 +693,7 @@ class LostPhoneService : Service() {
             isRecognizing = false
         } catch (_: Exception) {}
 
+        wakeScreenAndShowApp(source)
         playListenBeep()
         vibrateOnce()
         eventListener?.onIrisWakeup(source)
@@ -675,6 +705,97 @@ class LostPhoneService : Service() {
             // Let the beep finish before speaking.
             mainHandler.postDelayed({ speakYesAndListen() }, 300L)
         }
+        return true
+    }
+
+    /** Entry point for external triggers (accessibility long press). Main thread only. */
+    fun triggerIris(source: String): Boolean = beginIrisSession(source)
+
+    private fun buildIrisLaunchIntent(): Intent? =
+        packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("from_iris_trigger", true)
+        }
+
+    /**
+     * Turns the screen on and brings the app over the lock screen.
+     *  1. short bright wake lock (auto-released after 5 s),
+     *  2. direct activity start (allowed when the app is already visible or
+     *     the OS permits it),
+     *  3. high-priority notification with a full-screen intent, the sanctioned
+     *     way to show an activity over the lock screen from the background.
+     *     On Android 14+ without that permission it becomes a heads-up that
+     *     explains and offers the settings page.
+     */
+    private fun wakeScreenAndShowApp(source: String) {
+        try {
+            screenWakeLock?.let { if (it.isHeld) it.release() }
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            screenWakeLock = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "FindIt:IrisScreenWake"
+            ).apply { acquire(SCREEN_WAKE_MS) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Screen wake lock failed: ${e.message}")
+        }
+
+        val launch = buildIrisLaunchIntent() ?: return
+        try {
+            startActivity(launch)
+        } catch (e: Exception) {
+            Log.i(TAG, "Direct activity start not allowed ($source): ${e.message}")
+        }
+
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val pending = PendingIntent.getActivity(
+                this, 4, launch,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, WAKE_CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+            }
+            builder.setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setAutoCancel(true)
+                .setContentIntent(pending)
+            if (canUseFullScreenIntent(this)) {
+                builder.setContentTitle(cfg("listening_title", "Iris is listening"))
+                    .setContentText(cfg("yes_tell_me", "Yes, tell me."))
+                    .setFullScreenIntent(pending, true)
+            } else {
+                // Not allowed: explain in the user's language and offer the settings page.
+                val settings = PendingIntent.getActivity(
+                    this, 5, fullScreenSettingsIntent(this),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.setContentTitle(cfg("fsi_title", "Iris needs permission to wake the screen"))
+                    .setContentText(cfg("fsi_text", "Allow full-screen notifications for FindIt so Iris can turn the screen on."))
+                    .addAction(android.R.drawable.ic_menu_manage, cfg("fsi_action", "Allow screen wake"), settings)
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                @Suppress("DEPRECATION")
+                builder.setPriority(Notification.PRIORITY_HIGH)
+            }
+            nm.notify(WAKE_NOTIFICATION_ID, builder.build())
+            mainHandler.removeCallbacks(clearWakeNotificationRunnable)
+            mainHandler.postDelayed(clearWakeNotificationRunnable, WAKE_NOTIFICATION_CLEAR_MS)
+        } catch (e: Exception) {
+            Log.w(TAG, "Wake notification failed: ${e.message}")
+        }
+    }
+
+    private val clearWakeNotificationRunnable = Runnable {
+        try {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(WAKE_NOTIFICATION_ID)
+        } catch (_: Exception) {}
     }
 
     /** Hands the transcript to Dart and waits (bounded) for its spoken reply to end. */
@@ -981,6 +1102,18 @@ class LostPhoneService : Service() {
             }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
+
+            val wakeChannel = NotificationChannel(
+                WAKE_CHANNEL_ID,
+                "Iris screen wake",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Briefly shown when Iris turns the screen on"
+                setSound(null, null)
+                enableVibration(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            notificationManager.createNotificationChannel(wakeChannel)
         }
     }
 
@@ -1100,6 +1233,13 @@ class LostPhoneService : Service() {
         instance = null
         mainHandler.removeCallbacksAndMessages(null)
         stopVolumeSession()
+        try {
+            if (screenWakeLock?.isHeld == true) screenWakeLock?.release()
+        } catch (_: Exception) {}
+        screenWakeLock = null
+        try {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(WAKE_NOTIFICATION_ID)
+        } catch (_: Exception) {}
 
         stopAlarm()
 

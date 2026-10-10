@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'iris_permissions.dart';
 import 'iris_triggers.dart';
 import 'localization_service.dart';
 import 'settings_service.dart';
@@ -244,6 +245,10 @@ class LostPhoneService extends ChangeNotifier {
       if (minutes != null)
         'notif_text': l10n.irisNotificationText(minutes, lang),
       'talk_action': l10n.talkToIris(lang),
+      'listening_title': l10n.irisListeningTitle(lang),
+      'fsi_title': l10n.fsiNotifTitle(lang),
+      'fsi_text': l10n.fsiNotifText(lang),
+      'fsi_action': l10n.allowScreenWake(lang),
     };
   }
 
@@ -274,6 +279,37 @@ class LostPhoneService extends ChangeNotifier {
     try {
       await _channel.invokeMethod('irisDone');
     } catch (_) {}
+  }
+
+  /// Whether the Iris accessibility service is on and full-screen
+  /// notifications are allowed. Returns [HandsFreeStatus.unknown] on error.
+  Future<HandsFreeStatus> handsFreeStatus() async {
+    try {
+      final map = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'getHandsFreeStatus',
+      );
+      return HandsFreeStatus.fromMap(map);
+    } catch (_) {
+      return HandsFreeStatus.unknown;
+    }
+  }
+
+  Future<bool> openAccessibilitySettings() async {
+    try {
+      return await _channel.invokeMethod<bool>('openAccessibilitySettings') ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> openFullScreenSettings() async {
+    try {
+      return await _channel.invokeMethod<bool>('openFullScreenSettings') ??
+          false;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// A command heard while the app was not ready to receive it (cold start).

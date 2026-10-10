@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+import '../models/app_language.dart';
+import '../services/iris_permissions.dart';
 import '../services/localization_service.dart';
 import '../services/lost_phone_service.dart';
 import '../services/settings_service.dart';
@@ -21,11 +23,17 @@ class LostPhoneScreen extends StatefulWidget {
   State<LostPhoneScreen> createState() => _LostPhoneScreenState();
 }
 
-class _LostPhoneScreenState extends State<LostPhoneScreen> {
+class _LostPhoneScreenState extends State<LostPhoneScreen>
+    with WidgetsBindingObserver {
   final LostPhoneService _lostPhone = LostPhoneService.instance;
   final SpeechService _speech = SpeechService();
 
   int _selectedTimeout = 20; // Default 20 minutes
+  HandsFreeStatus _handsFree = HandsFreeStatus.unknown;
+  bool _guideOpen = false;
+
+  AppLanguage get _lang => SettingsService.instance.preferredLanguage;
+  LocalizationService get _l10n => LocalizationService.instance;
   bool _isLoading = false;
   StreamSubscription<String>? _triggerSub;
   StreamSubscription<void>? _stopSub;
@@ -35,8 +43,10 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _lostPhone.initialize();
     _speech.initialize();
+    _refreshHandsFree(offerGuide: true);
 
     _triggerSub = _lostPhone.onTriggerDetected.listen((phrase) {
       if (mounted) {
@@ -75,6 +85,7 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _triggerSub?.cancel();
     _stopSub?.cancel();
     _irisWakeupSub?.cancel();
@@ -105,10 +116,17 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
         setState(() => _isLoading = false);
         if (success) {
           final lang = SettingsService.instance.preferredLanguage;
-          _speech.speak(
+          await _speech.speak(
             LocalizationService.instance.irisArmed(_selectedTimeout, lang),
             urgent: true,
           );
+          // Armed but a permission is missing: say exactly what will not work.
+          final status = await _lostPhone.handsFreeStatus();
+          if (mounted) setState(() => _handsFree = status);
+          for (final warning in status.armedWarnings(lang, _l10n)) {
+            if (!mounted) break;
+            await _speech.speak(warning, urgent: true);
+          }
         } else if (_lostPhone.lastError != null) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -119,6 +137,193 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
         }
       }
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back from Android Settings: re-read the permission status.
+    if (state == AppLifecycleState.resumed) _refreshHandsFree();
+  }
+
+  Future<void> _refreshHandsFree({bool offerGuide = false}) async {
+    final status = await _lostPhone.handsFreeStatus();
+    if (!mounted) return;
+    setState(() => _handsFree = status);
+    if (offerGuide && !_guideOpen) {
+      final shown = await HandsFreeGuideStore.wasShown();
+      if (mounted && status.shouldShowFirstRunGuide(guideAlreadyShown: shown)) {
+        _showFirstRunGuide();
+      }
+    }
+  }
+
+  Future<void> _explainHandsFree() async {
+    await _speech.speak(_l10n.handsFreeExplain(_lang), urgent: true);
+  }
+
+  Future<void> _openAccessibilitySettings() async {
+    await _speech.speak(_l10n.openAccessibilitySettings(_lang), urgent: true);
+    await _lostPhone.openAccessibilitySettings();
+  }
+
+  Future<void> _openScreenWakeSettings() async {
+    await _speech.speak(_l10n.allowScreenWake(_lang), urgent: true);
+    await _lostPhone.openFullScreenSettings();
+  }
+
+  /// Spoken, skippable, shown once.
+  Future<void> _showFirstRunGuide() async {
+    _guideOpen = true;
+    await HandsFreeGuideStore.markShown();
+    _speech.speak(_l10n.handsFreeGuide(_lang), urgent: true);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_l10n.handsFreeTitle(_lang)),
+        content: Text(_l10n.handsFreeGuide(_lang)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _speech.stop();
+              Navigator.pop(ctx);
+            },
+            child: Text(_l10n.skipForNow(_lang)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openScreenWakeSettings();
+            },
+            child: Text(_l10n.allowScreenWake(_lang)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openAccessibilitySettings();
+            },
+            child: Text(_l10n.openAccessibilitySettings(_lang)),
+          ),
+        ],
+      ),
+    );
+    _guideOpen = false;
+  }
+
+  Widget _statusRow(bool ok, String text) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Icon(
+          ok ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+          color: ok ? AppTheme.success : AppTheme.error,
+          size: 24,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _handsFreeCard() {
+    final h = _handsFree;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(
+          color: h.allReady ? AppTheme.success : AppTheme.borderSubtle,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _l10n.handsFreeTitle(_lang),
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _l10n.handsFreeExplain(_lang),
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Semantics(
+            liveRegion: true,
+            child: _statusRow(
+              h.accessibilityEnabled,
+              h.accessibilityEnabled
+                  ? _l10n.accessibilityStatusOn(_lang)
+                  : _l10n.accessibilityStatusOff(_lang),
+            ),
+          ),
+          _statusRow(
+            h.fullScreenAllowed,
+            h.fullScreenAllowed
+                ? _l10n.screenWakeStatusOn(_lang)
+                : _l10n.screenWakeStatusOff(_lang),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 60,
+            child: ElevatedButton.icon(
+              onPressed: _openAccessibilitySettings,
+              icon: const Icon(Icons.accessibility_new_rounded, size: 26),
+              label: Text(
+                _l10n.openAccessibilitySettings(_lang),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.black,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: OutlinedButton.icon(
+              onPressed: _openScreenWakeSettings,
+              icon: const Icon(Icons.lock_open_rounded),
+              label: Text(_l10n.allowScreenWake(_lang)),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: TextButton.icon(
+              onPressed: _explainHandsFree,
+              icon: const Icon(Icons.volume_up_rounded),
+              label: Text(_l10n.hearExplanation(_lang)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _stopAlarm() async {
@@ -399,6 +604,10 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 24),
+
+                // HANDS-FREE TRIGGER (accessibility + screen wake)
+                _handsFreeCard(),
                 const SizedBox(height: 24),
 
                 // QUICK TEST ALARM
