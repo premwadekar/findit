@@ -12,6 +12,9 @@ enum AssistantIntent {
   help,
   lostPhone,
   irisWakeup,
+  stopAlarm,
+  battery,
+  time,
   unknown,
 }
 
@@ -52,11 +55,24 @@ class AssistantService {
     return _model;
   }
 
-  /// Parses user voice or text input into an actionable FindIt intent.
-  Future<IntentResult> processUserInput(
-    String transcript, {
-    AppLanguage? language,
-  }) async {
+  static final RegExp _stopRegex = RegExp(
+    r'\b(stop|silence|quiet|mute|shut\s*up|cancel)\b|'
+    r'बंद|रोको|रुको|चुप|ನಿಲ್ಲಿಸು|ಸಾಕು|ఆపు|ఆపండి|ఆపేయి|நிறுத்து|நிறுத்தவும்|போதும்',
+    caseSensitive: false,
+  );
+  static final RegExp _batteryRegex = RegExp(
+    r'\b(battery|charge|charging)\b|बैटरी|चार्ज|ಬ್ಯಾಟರಿ|ಚಾರ್ಜ್|బ్యాటరీ|ఛార్జ్|చార్జ్|பேட்டரி|சார்ஜ்',
+    caseSensitive: false,
+  );
+  static final RegExp _timeRegex = RegExp(
+    r"\b(what('s|\s+is)?\s+(the\s+)?time|what\s+time|time\s+is\s+it|time\s+now|current\s+time|tell\s+(me\s+)?(the\s+)?time)\b|^\s*time\s*[?.]?\s*$|"
+    r'समय|टाइम|कितने\s*बजे|कितना\s*बजा|ಸಮಯ|ಟೈಮ್|ಗಂಟೆ|సమయం|టైమ్|గంటలు|நேரம்|டைம்|மணி',
+    caseSensitive: false,
+  );
+
+  /// Fully offline intent parsing: no network, never calls the cloud.
+  /// Returns [AssistantIntent.unknown] (with no reply) when nothing matches.
+  IntentResult parseOffline(String transcript, {AppLanguage? language}) {
     final text = transcript.trim();
     if (text.isEmpty) {
       return const IntentResult(intent: AssistantIntent.unknown);
@@ -65,6 +81,18 @@ class AssistantService {
     final lang = language ?? SettingsService.instance.preferredLanguage;
     final l10n = LocalizationService.instance;
     final lower = text.toLowerCase();
+
+    // 0. Device-state commands. These must win over object matching:
+    // "battery of my phone" contains "phone" but is not a find request.
+    if (_stopRegex.hasMatch(lower)) {
+      return const IntentResult(intent: AssistantIntent.stopAlarm);
+    }
+    if (_batteryRegex.hasMatch(lower)) {
+      return const IntentResult(intent: AssistantIntent.battery);
+    }
+    if (_timeRegex.hasMatch(lower)) {
+      return const IntentResult(intent: AssistantIntent.time);
+    }
 
     // 1. Check for alarm / lost phone mode intent ONLY when user explicitly asks where phone is
     final isAlarmQuery = lower.contains('where are you') ||
@@ -160,6 +188,27 @@ class AssistantService {
         lower.contains('உதவி')) {
       return const IntentResult(intent: AssistantIntent.help);
     }
+
+    return const IntentResult(intent: AssistantIntent.unknown);
+  }
+
+  /// Parses user voice or text input into an actionable FindIt intent.
+  /// Offline rules first; the optional Gemini fallback only runs when the
+  /// user has explicitly enabled cloud AI in Settings.
+  Future<IntentResult> processUserInput(
+    String transcript, {
+    AppLanguage? language,
+  }) async {
+    final text = transcript.trim();
+    if (text.isEmpty) {
+      return const IntentResult(intent: AssistantIntent.unknown);
+    }
+
+    final lang = language ?? SettingsService.instance.preferredLanguage;
+    final l10n = LocalizationService.instance;
+
+    final offline = parseOffline(text, language: lang);
+    if (offline.intent != AssistantIntent.unknown) return offline;
 
     // 3. Optional Cloud AI (Gemini) fallback if enabled and connected
     final settings = SettingsService.instance;

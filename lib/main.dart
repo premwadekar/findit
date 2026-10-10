@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'screens/home_screen.dart';
 import 'screens/language_selection_screen.dart';
+import 'services/iris_controller.dart';
 import 'services/settings_service.dart';
 
 import 'theme/app_theme.dart';
@@ -12,6 +13,7 @@ void main() async {
   // Lock to portrait: detection coordinates and guidance assume an upright image.
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   await SettingsService.instance.initialize();
+  IrisController.instance.start();
   runApp(const FindItApp());
 }
 
@@ -23,6 +25,7 @@ class FindItApp extends StatelessWidget {
     final isFirstLaunch = SettingsService.instance.isFirstLaunch;
 
     return MaterialApp(
+      navigatorKey: IrisController.instance.navigatorKey,
       title: 'FindIt',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,

@@ -9,6 +9,7 @@ import '../services/assistant_service.dart';
 import '../services/localization_service.dart';
 import '../services/settings_service.dart';
 import '../services/lost_phone_service.dart';
+import '../services/iris_controller.dart';
 import '../services/speech_service.dart';
 import '../theme/app_theme.dart';
 import 'finder_screen.dart';
@@ -46,7 +47,6 @@ class _HomeScreenState extends State<HomeScreen>
   late AnimationController _pulseController;
   StreamSubscription<void>? _lostPhoneStoppedSub;
   StreamSubscription<String>? _irisWakeupSub;
-  StreamSubscription<String>? _voiceCommandSub;
 
   AppLanguage get _lang => _settings.preferredLanguage;
   String get _name => _settings.userName;
@@ -78,21 +78,14 @@ class _HomeScreenState extends State<HomeScreen>
 
     _irisWakeupSub = _lostPhone.onIrisWakeup.listen((phrase) {
       if (mounted) {
-        final greeting = _l10n.howCanIHelp(_lang);
+        final greeting = _l10n.yesTellMe(_lang);
         setState(() => _statusText = greeting);
         // Spoken prompt and microphone reply listening are handled seamlessly
         // by the foreground service to prevent audio pipeline collisions.
       }
     });
 
-    _voiceCommandSub = _lostPhone.onVoiceCommand.listen((command) {
-      if (mounted && command.isNotEmpty) {
-        if (ModalRoute.of(context)?.isCurrent != true) {
-          return;
-        }
-        _handleVoiceInput(command);
-      }
-    });
+    // Voice commands from Iris are executed centrally by IrisController.
 
     _initVoice();
   }
@@ -129,7 +122,6 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _lostPhoneStoppedSub?.cancel();
     _irisWakeupSub?.cancel();
-    _voiceCommandSub?.cancel();
     _speech.stop();
     _speechToText.stop();
     _pulseController.dispose();
@@ -652,6 +644,41 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 onSubmitted: _onManualSearchSubmit,
+              ),
+              const SizedBox(height: 20),
+
+              // Hands-free assistant: one big accessible button
+              Semantics(
+                button: true,
+                label: _l10n.talkToIris(_lang),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 72,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final ok = await IrisController.instance.talk();
+                      if (!ok && mounted) {
+                        setState(() => _statusText = _l10n.irisStatusOff(_lang));
+                      }
+                    },
+                    icon: const Icon(Icons.record_voice_over_rounded, size: 32),
+                    label: Text(
+                      _l10n.talkToIris(_lang).toUpperCase(),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.1,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                      ),
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
 

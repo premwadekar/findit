@@ -478,4 +478,152 @@ class LocalizationService {
     AppLanguage.telugu => 'నేను ఇక్కడే ఉన్నాను. నా స్వరాన్ని లేదా అలారంను అనుసరించండి.',
     AppLanguage.tamil => 'நான் இங்கே இருக்கிறேன். என் குரல் அல்லது அலாரத்தைப் பின்பற்றுங்கள்.',
   };
+
+  // ---- Iris hands-free assistant ----
+
+  String yesTellMe(AppLanguage lang) => switch (lang) {
+    AppLanguage.english => 'Yes, tell me.',
+    AppLanguage.hindi => 'जी, बताइए।',
+    AppLanguage.kannada => 'ಹೌದು, ಹೇಳಿ.',
+    AppLanguage.telugu => 'అవును, చెప్పండి.',
+    AppLanguage.tamil => 'ஆம், சொல்லுங்கள்.',
+  };
+
+  String didntHearAnything(AppLanguage lang) => switch (lang) {
+    AppLanguage.english => "I didn't hear anything.",
+    AppLanguage.hindi => 'मुझे कुछ सुनाई नहीं दिया।',
+    AppLanguage.kannada => 'ನನಗೆ ಏನೂ ಕೇಳಿಸಲಿಲ್ಲ.',
+    AppLanguage.telugu => 'నాకు ఏమీ వినిపించలేదు.',
+    AppLanguage.tamil => 'எனக்கு எதுவும் கேட்கவில்லை.',
+  };
+
+  String irisCantDoThat(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+      "Sorry, I can't do that yet. I can find objects, ring your phone, tell the battery or time.",
+    AppLanguage.hindi =>
+      'माफ़ कीजिए, मैं अभी यह नहीं कर सकता। मैं चीज़ें ढूंढ सकता हूँ, आपका फ़ोन बजा सकता हूँ, बैटरी या समय बता सकता हूँ।',
+    AppLanguage.kannada =>
+      'ಕ್ಷಮಿಸಿ, ನಾನು ಇದನ್ನು ಇನ್ನೂ ಮಾಡಲಾರೆ. ನಾನು ವಸ್ತುಗಳನ್ನು ಹುಡುಕಬಲ್ಲೆ, ನಿಮ್ಮ ಫೋನ್ ರಿಂಗ್ ಮಾಡಬಲ್ಲೆ, ಬ್ಯಾಟರಿ ಅಥವಾ ಸಮಯ ಹೇಳಬಲ್ಲೆ.',
+    AppLanguage.telugu =>
+      'క్షమించండి, నేను ఇది ఇంకా చేయలేను. నేను వస్తువులను వెతకగలను, మీ ఫోన్ రింగ్ చేయగలను, బ్యాటరీ లేదా సమయం చెప్పగలను.',
+    AppLanguage.tamil =>
+      'மன்னிக்கவும், இதை என்னால் இன்னும் செய்ய முடியாது. பொருட்களைத் தேடலாம், உங்கள் போனை ஒலிக்கச் செய்யலாம், பேட்டரி அல்லது நேரத்தைச் சொல்லலாம்.',
+  };
+
+  String irisArmed(int minutes, AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+      'Iris is on. Say Hey Iris, or double-press Volume Up. It turns off in $minutes minutes.',
+    AppLanguage.hindi =>
+      'आइरिस चालू है। हे आइरिस कहें, या वॉल्यूम अप दो बार दबाएं। $minutes मिनट में बंद हो जाएगा।',
+    AppLanguage.kannada =>
+      'ಐರಿಸ್ ಆನ್ ಆಗಿದೆ. ಹೇ ಐರಿಸ್ ಎನ್ನಿ, ಅಥವಾ ವಾಲ್ಯೂಮ್ ಅಪ್ ಅನ್ನು ಎರಡು ಬಾರಿ ಒತ್ತಿ. $minutes ನಿಮಿಷಗಳಲ್ಲಿ ಆಫ್ ಆಗುತ್ತದೆ.',
+    AppLanguage.telugu =>
+      'ఐరిస్ ఆన్ అయింది. హే ఐరిస్ అనండి, లేదా వాల్యూమ్ అప్ రెండుసార్లు నొక్కండి. $minutes నిమిషాల్లో ఆఫ్ అవుతుంది.',
+    AppLanguage.tamil =>
+      'ஐரிஸ் இயக்கத்தில் உள்ளது. ஹே ஐரிஸ் என்று சொல்லுங்கள், அல்லது வால்யூம் அப்பை இரண்டு முறை அழுத்துங்கள். $minutes நிமிடங்களில் அணைந்துவிடும்.',
+  };
+
+  String irisDisarmed(AppLanguage lang) => switch (lang) {
+    AppLanguage.english => 'Iris is off. The microphone is off.',
+    AppLanguage.hindi => 'आइरिस बंद है। माइक्रोफ़ोन बंद है।',
+    AppLanguage.kannada => 'ಐರಿಸ್ ಆಫ್ ಆಗಿದೆ. ಮೈಕ್ರೋಫೋನ್ ಆಫ್ ಆಗಿದೆ.',
+    AppLanguage.telugu => 'ఐరిస్ ఆఫ్ అయింది. మైక్రోఫోన్ ఆఫ్ అయింది.',
+    AppLanguage.tamil => 'ஐரிஸ் அணைக்கப்பட்டது. மைக்ரோஃபோன் அணைக்கப்பட்டது.',
+  };
+
+  String irisNotificationText(int minutes, AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+      'Say "Hey Iris", double-press Volume Up, or tap Talk to Iris. Auto-off in $minutes min.',
+    AppLanguage.hindi =>
+      '"हे आइरिस" कहें, वॉल्यूम अप दो बार दबाएं, या आइरिस से बात करें दबाएं। $minutes मिनट में अपने-आप बंद।',
+    AppLanguage.kannada =>
+      '"ಹೇ ಐರಿಸ್" ಎನ್ನಿ, ವಾಲ್ಯೂಮ್ ಅಪ್ ಎರಡು ಬಾರಿ ಒತ್ತಿ, ಅಥವಾ ಐರಿಸ್ ಜೊತೆ ಮಾತನಾಡಿ ಒತ್ತಿ. $minutes ನಿಮಿಷದಲ್ಲಿ ತಾನಾಗಿ ಆಫ್.',
+    AppLanguage.telugu =>
+      '"హే ఐరిస్" అనండి, వాల్యూమ్ అప్ రెండుసార్లు నొక్కండి, లేదా ఐరిస్‌తో మాట్లాడండి నొక్కండి. $minutes నిమిషాల్లో ఆటో-ఆఫ్.',
+    AppLanguage.tamil =>
+      '"ஹே ஐரிஸ்" என்று சொல்லுங்கள், வால்யூம் அப்பை இரண்டு முறை அழுத்துங்கள், அல்லது ஐரிஸுடன் பேசுங்கள் அழுத்துங்கள். $minutes நிமிடத்தில் தானாக அணையும்.',
+  };
+
+  String talkToIris(AppLanguage lang) => switch (lang) {
+    AppLanguage.english => 'Talk to Iris',
+    AppLanguage.hindi => 'आइरिस से बात करें',
+    AppLanguage.kannada => 'ಐರಿಸ್ ಜೊತೆ ಮಾತನಾಡಿ',
+    AppLanguage.telugu => 'ఐరిస్‌తో మాట్లాడండి',
+    AppLanguage.tamil => 'ஐரிஸுடன் பேசுங்கள்',
+  };
+
+  String irisStatusOn(AppLanguage lang) => switch (lang) {
+    AppLanguage.english => 'IRIS IS ON',
+    AppLanguage.hindi => 'आइरिस चालू है',
+    AppLanguage.kannada => 'ಐರಿಸ್ ಆನ್ ಆಗಿದೆ',
+    AppLanguage.telugu => 'ఐరిస్ ఆన్‌లో ఉంది',
+    AppLanguage.tamil => 'ஐரிஸ் இயக்கத்தில் உள்ளது',
+  };
+
+  String irisStatusOff(AppLanguage lang) => switch (lang) {
+    AppLanguage.english => 'IRIS IS OFF',
+    AppLanguage.hindi => 'आइरिस बंद है',
+    AppLanguage.kannada => 'ಐರಿಸ್ ಆಫ್ ಆಗಿದೆ',
+    AppLanguage.telugu => 'ఐరిస్ ఆఫ్‌లో ఉంది',
+    AppLanguage.tamil => 'ஐரிஸ் அணைந்துள்ளது',
+  };
+
+  String batteryLevel(int percent, AppLanguage lang) => switch (lang) {
+    AppLanguage.english => 'Battery is at $percent percent.',
+    AppLanguage.hindi => 'बैटरी $percent प्रतिशत है।',
+    AppLanguage.kannada => 'ಬ್ಯಾಟರಿ ಶೇಕಡಾ $percent ಇದೆ.',
+    AppLanguage.telugu => 'బ్యాటరీ $percent శాతం ఉంది.',
+    AppLanguage.tamil => 'பேட்டரி $percent சதவீதம் உள்ளது.',
+  };
+
+  String batteryUnavailable(AppLanguage lang) => switch (lang) {
+    AppLanguage.english => "I couldn't read the battery level.",
+    AppLanguage.hindi => 'मैं बैटरी का स्तर नहीं पढ़ सका।',
+    AppLanguage.kannada => 'ನನಗೆ ಬ್ಯಾಟರಿ ಮಟ್ಟ ಓದಲಾಗಲಿಲ್ಲ.',
+    AppLanguage.telugu => 'నేను బ్యాటరీ స్థాయిని చదవలేకపోయాను.',
+    AppLanguage.tamil => 'பேட்டரி அளவை என்னால் படிக்க முடியவில்லை.',
+  };
+
+  String timeIs(DateTime now, AppLanguage lang) {
+    final t = spokenTime(now, lang);
+    return switch (lang) {
+      AppLanguage.english => 'The time is $t.',
+      AppLanguage.hindi => 'समय $t है।',
+      AppLanguage.kannada => 'ಸಮಯ $t.',
+      AppLanguage.telugu => 'సమయం $t.',
+      AppLanguage.tamil => 'நேரம் $t.',
+    };
+  }
+
+  /// English uses 12-hour with AM/PM; other languages use 24-hour numerals,
+  /// which every Indian-language TTS voice reads reliably.
+  String spokenTime(DateTime now, AppLanguage lang) {
+    final mm = now.minute.toString().padLeft(2, '0');
+    if (lang == AppLanguage.english) {
+      final h12 = now.hour % 12 == 0 ? 12 : now.hour % 12;
+      return '$h12:$mm ${now.hour < 12 ? 'AM' : 'PM'}';
+    }
+    return '${now.hour}:$mm';
+  }
+
+  String noAlarmRinging(AppLanguage lang) => switch (lang) {
+    AppLanguage.english => 'No alarm is ringing right now.',
+    AppLanguage.hindi => 'अभी कोई अलार्म नहीं बज रहा।',
+    AppLanguage.kannada => 'ಈಗ ಯಾವುದೇ ಅಲಾರಂ ಮೊಳಗುತ್ತಿಲ್ಲ.',
+    AppLanguage.telugu => 'ఇప్పుడు ఏ అలారం మోగడం లేదు.',
+    AppLanguage.tamil => 'இப்போது எந்த அலாரமும் ஒலிக்கவில்லை.',
+  };
+
+  String surroundingsUnavailable(AppLanguage lang) => switch (lang) {
+    AppLanguage.english =>
+      'Describing your surroundings is not available yet. I can find a specific object for you.',
+    AppLanguage.hindi =>
+      'आस-पास का वर्णन अभी उपलब्ध नहीं है। मैं कोई खास वस्तु ढूंढ सकता हूँ।',
+    AppLanguage.kannada =>
+      'ಸುತ್ತಮುತ್ತಲಿನ ವಿವರಣೆ ಇನ್ನೂ ಲಭ್ಯವಿಲ್ಲ. ನಾನು ಒಂದು ನಿರ್ದಿಷ್ಟ ವಸ್ತುವನ್ನು ಹುಡುಕಬಲ್ಲೆ.',
+    AppLanguage.telugu =>
+      'పరిసరాల వివరణ ఇంకా అందుబాటులో లేదు. నేను ఒక నిర్దిష్ట వస్తువును వెతకగలను.',
+    AppLanguage.tamil =>
+      'சுற்றுப்புற விவரிப்பு இன்னும் கிடைக்கவில்லை. ஒரு குறிப்பிட்ட பொருளை நான் தேடித் தர முடியும்.',
+  };
 }

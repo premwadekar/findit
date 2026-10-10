@@ -3,6 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'iris_triggers.dart';
+import 'localization_service.dart';
+import 'settings_service.dart';
+
 /// Service managing Android Compliant Foreground Microphone Service for Lost Phone Mode.
 ///
 /// Features:
@@ -62,6 +66,7 @@ class LostPhoneService extends ChangeNotifier {
       _isRunning = running;
       _isAlarmRinging = alarm;
       notifyListeners();
+      if (running) syncIrisConfig();
     } catch (_) {}
   }
 
@@ -175,12 +180,16 @@ class LostPhoneService extends ChangeNotifier {
     try {
       final success = await _channel.invokeMethod<bool>(
             'startLostPhoneMode',
-            {'timeoutMinutes': timeoutMinutes},
+            {
+              'timeoutMinutes': timeoutMinutes,
+              'config': _irisConfig(timeoutMinutes),
+            },
           ) ??
           false;
       if (success) {
         _isRunning = true;
         _isAlarmRinging = false;
+        _timeoutMinutes = timeoutMinutes;
         notifyListeners();
       }
       return success;
@@ -217,6 +226,81 @@ class LostPhoneService extends ChangeNotifier {
       notifyListeners();
       return success;
     } catch (e) {
+      return false;
+    }
+  }
+
+  int? _timeoutMinutes;
+
+  /// Strings and wake-word pattern the native service needs. Dart owns all
+  /// user-facing text so every language lives in LocalizationService.
+  Map<String, String> _irisConfig(int? minutes) {
+    final lang = SettingsService.instance.preferredLanguage;
+    final l10n = LocalizationService.instance;
+    return {
+      'wake_pattern': IrisWakeWord.pattern,
+      'yes_tell_me': l10n.yesTellMe(lang),
+      'didnt_hear': l10n.didntHearAnything(lang),
+      if (minutes != null)
+        'notif_text': l10n.irisNotificationText(minutes, lang),
+      'talk_action': l10n.talkToIris(lang),
+    };
+  }
+
+  /// Re-sends strings (e.g. after a language change) to a running service.
+  Future<void> syncIrisConfig() async {
+    if (!_isRunning) return;
+    try {
+      await _channel.invokeMethod('updateIrisConfig', {
+        'config': _irisConfig(_timeoutMinutes),
+      });
+    } catch (_) {}
+  }
+
+  /// Starts one Iris session (beep, "Yes, tell me", listen once).
+  /// The service must be armed; the native side debounces repeat triggers.
+  Future<bool> talkToIris() async {
+    initialize();
+    try {
+      return await _channel.invokeMethod<bool>('talkToIris') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Tells the service the spoken reply finished so it can resume wake-word
+  /// listening (prevents the mic hearing Iris's own voice).
+  Future<void> irisDone() async {
+    try {
+      await _channel.invokeMethod('irisDone');
+    } catch (_) {}
+  }
+
+  /// A command heard while the app was not ready to receive it (cold start).
+  Future<String?> takePendingCommand() async {
+    try {
+      return await _channel.invokeMethod<String>('takePendingCommand');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Battery percentage from the OS, or null when unavailable.
+  Future<int?> batteryPercent() async {
+    try {
+      final v = await _channel.invokeMethod<int>('getBatteryPercent');
+      return (v == null || v < 0) ? null : v;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Rings the loud alarm because the user asked Iris where the phone is.
+  Future<bool> ringAlarm() async {
+    initialize();
+    try {
+      return await _channel.invokeMethod<bool>('ringAlarm') ?? false;
+    } catch (_) {
       return false;
     }
   }

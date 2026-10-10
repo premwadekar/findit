@@ -1,8 +1,10 @@
 package com.findit.findit
 
 import android.content.Intent
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
@@ -77,6 +79,7 @@ class MainActivity : FlutterActivity() {
                         val intent = Intent(this@MainActivity, LostPhoneService::class.java).apply {
                             action = LostPhoneService.ACTION_START
                             putExtra(LostPhoneService.EXTRA_TIMEOUT_MINUTES, timeout)
+                            putExtra(LostPhoneService.EXTRA_CONFIG, configBundle(call.argument<Map<String, String>>("config")))
                         }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             startForegroundService(intent)
@@ -109,6 +112,50 @@ class MainActivity : FlutterActivity() {
                             startService(intent)
                         }
                         result.success(true)
+                    }
+                    "updateIrisConfig" -> {
+                        val intent = Intent(this@MainActivity, LostPhoneService::class.java).apply {
+                            action = LostPhoneService.ACTION_CONFIG
+                            putExtra(LostPhoneService.EXTRA_CONFIG, configBundle(call.argument<Map<String, String>>("config")))
+                        }
+                        // Only meaningful while the service already runs.
+                        if (LostPhoneService.isRunning) startService(intent)
+                        result.success(LostPhoneService.isRunning)
+                    }
+                    "talkToIris" -> {
+                        if (LostPhoneService.isRunning) {
+                            startService(Intent(this@MainActivity, LostPhoneService::class.java).apply {
+                                action = LostPhoneService.ACTION_TALK
+                            })
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    }
+                    "takePendingCommand" -> {
+                        result.success(LostPhoneService.takePendingCommand())
+                    }
+                    "irisDone" -> {
+                        LostPhoneService.instance?.onIrisReplyDone()
+                        result.success(true)
+                    }
+                    "ringAlarm" -> {
+                        if (LostPhoneService.isRunning) {
+                            startService(Intent(this@MainActivity, LostPhoneService::class.java).apply {
+                                action = LostPhoneService.ACTION_RING
+                            })
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    }
+                    "getBatteryPercent" -> {
+                        try {
+                            val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+                            result.success(bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
+                        } catch (e: Exception) {
+                            result.success(-1)
+                        }
                     }
                     "isServiceRunning" -> {
                         result.success(LostPhoneService.isRunning)
@@ -147,9 +194,7 @@ class MainActivity : FlutterActivity() {
             }
 
             override fun onVoiceCommand(command: String) {
-                mainHandler.post {
-                    lostPhoneChannel?.invokeMethod("onVoiceCommand", mapOf("command" to command))
-                }
+                mainHandler.post { sendCommandToDart(command) }
             }
 
             override fun onServiceError(error: String) {
@@ -160,6 +205,27 @@ class MainActivity : FlutterActivity() {
         }
 
         handleIntent(intent)
+    }
+
+    /** Delivers a command; it stays "pending" until Dart acknowledges it. */
+    private fun sendCommandToDart(command: String) {
+        lostPhoneChannel?.invokeMethod(
+            "onVoiceCommand",
+            mapOf("command" to command),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    if (LostPhoneService.pendingCommand == command) LostPhoneService.pendingCommand = null
+                }
+                override fun error(code: String, message: String?, details: Any?) {}
+                override fun notImplemented() {}
+            }
+        )
+    }
+
+    private fun configBundle(map: Map<String, String>?): Bundle {
+        val b = Bundle()
+        map?.forEach { (k, v) -> b.putString(k, v) }
+        return b
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -183,9 +249,7 @@ class MainActivity : FlutterActivity() {
         if (intent.getBooleanExtra("from_voice_command", false)) {
             val command = intent.getStringExtra("command") ?: ""
             if (command.isNotEmpty()) {
-                mainHandler.post {
-                    lostPhoneChannel?.invokeMethod("onVoiceCommand", mapOf("command" to command))
-                }
+                mainHandler.post { sendCommandToDart(command) }
             }
         }
     }
@@ -212,6 +276,19 @@ class MainActivity : FlutterActivity() {
         }
 
         val keyCode = event.keyCode
+
+        // Iris trigger: a second Volume Up within ~600 ms while Iris is armed.
+        // The first press is NOT consumed, so volume still changes normally.
+        // Skipped while a screen is intercepting volume keys (language selection).
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP &&
+            !volumeInterceptionEnabled &&
+            event.action == KeyEvent.ACTION_DOWN &&
+            event.repeatCount == 0
+        ) {
+            if (LostPhoneService.instance?.onVolumeUpPress() == true) {
+                return true
+            }
+        }
 
         // Detect Power button to confirm if Android delivers it to our window
         if (keyCode == KeyEvent.KEYCODE_POWER) {

@@ -14,6 +14,10 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.media.ToneGenerator
+import android.media.VolumeProvider
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -22,6 +26,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -44,6 +49,33 @@ class LostPhoneService : Service() {
         const val ACTION_STOP = "com.findit.findit.ACTION_STOP_LOST_PHONE"
         const val ACTION_STOP_ALARM = "com.findit.findit.ACTION_STOP_ALARM"
         const val ACTION_TEST_ALARM = "com.findit.findit.ACTION_TEST_ALARM"
+        const val ACTION_TALK = "com.findit.findit.ACTION_TALK_TO_IRIS"
+        const val ACTION_CONFIG = "com.findit.findit.ACTION_IRIS_CONFIG"
+        const val ACTION_RING = "com.findit.findit.ACTION_RING_ALARM"
+
+        const val EXTRA_CONFIG = "extra_iris_config"
+        private const val IRIS_PREFS = "findit_iris_config"
+        private const val COMMAND_WINDOW_MS = 8000L
+        private const val TRIGGER_COOLDOWN_MS = 2000L
+        private const val DART_REPLY_FALLBACK_MS = 20000L
+
+        @Volatile
+        var instance: LostPhoneService? = null
+            private set
+
+        // A command that Dart has not acknowledged yet (e.g. app cold-starting
+        // from the screen-off state). Dart pulls it once its handler exists.
+        @Volatile
+        var pendingCommand: String? = null
+        @Volatile
+        var pendingCommandAtMs: Long = 0L
+
+        fun takePendingCommand(): String? {
+            val cmd = pendingCommand
+            val fresh = SystemClock.uptimeMillis() - pendingCommandAtMs < 15000L
+            pendingCommand = null
+            return if (fresh) cmd else null
+        }
 
         const val EXTRA_TIMEOUT_MINUTES = "extra_timeout_minutes"
 
@@ -86,12 +118,40 @@ class LostPhoneService : Service() {
         """\b(ಫೋನ್\s+ಎಲ್ಲಿದೆ|ಎಲ್ಲಿದ್ದೀಯಾ?|ಫೋನ್\s+ರಿಂಗ್\s+ಮಾಡು|ಕಳೆದುಹೋದ\s+ಫೋನ್)\b"""
     )
 
-    // 2. Assistant Wakeup: "Hey Iris", "Iris", "Hi Iris", "Ok Iris", phonetic matches like "Here it is" / "Here is", "Harris", "Harry", "हे आइरिस", "ಐರಿಸ್"
-    private val irisWakeupRegex = Regex(
-        """(?i)\b(hey|hi|ok|okay|hei|hai|ay|a|here|hay)?\s*(iris|irish|ayres|aires|ayris|airis|eris|irus|iras|ires|aris|iriss|it\s+is)\b|""" +
-        """(?i)\bhere\s+is\b|\bharris\b|\bharry\b|\bheiress\b|\bhigh\s*risk\b|""" +
-        """(हे|हाय|हेलो\s+)?(आइरिस|आयरिस|आईरिस|इरिस)|(ಹೇ|ಹಾಯ್\s+)?(ಐರಿಸ್)"""
-    )
+    // 2. Assistant wake word. The pattern is owned by Dart (IrisWakeWord.pattern,
+    // unit-tested) and delivered in the Iris config; this simple fallback only
+    // applies if the service starts before any config was ever saved.
+    private val fallbackWakePattern = """\b(?:hey|hi|ok|okay)?\s*iris\b"""
+    private var wakeRegexCache: Regex? = null
+    private var wakeRegexCachePattern: String? = null
+
+    private fun irisPrefs() = getSharedPreferences(IRIS_PREFS, Context.MODE_PRIVATE)
+
+    private fun cfg(key: String, default: String): String =
+        irisPrefs().getString(key, null)?.takeIf { it.isNotBlank() } ?: default
+
+    private fun wakeRegex(): Regex {
+        val pattern = cfg("wake_pattern", fallbackWakePattern)
+        if (wakeRegexCache == null || wakeRegexCachePattern != pattern) {
+            wakeRegexCache = try {
+                Regex(pattern, RegexOption.IGNORE_CASE)
+            } catch (e: Exception) {
+                Log.e(TAG, "Bad wake pattern, using fallback: ${e.message}")
+                Regex(fallbackWakePattern, RegexOption.IGNORE_CASE)
+            }
+            wakeRegexCachePattern = pattern
+        }
+        return wakeRegexCache!!
+    }
+
+    private fun saveIrisConfig(config: Bundle?) {
+        if (config == null) return
+        val editor = irisPrefs().edit()
+        for (key in config.keySet()) {
+            config.getString(key)?.let { editor.putString(key, it) }
+        }
+        editor.apply()
+    }
 
     // 3. Stop Alarm: Voice commands to silence ringing alarm
     private val stopAlarmRegex = Regex(
@@ -103,11 +163,45 @@ class LostPhoneService : Service() {
 
     private var isAwaitingUserCommand: Boolean = false
     private var isSpeakingPrompt: Boolean = false
+
+    // One Iris session = trigger -> beep -> "Yes, tell me" -> one command -> reply.
+    @Volatile private var irisSessionActive: Boolean = false
+    private var lastTriggerMs: Long = -TRIGGER_COOLDOWN_MS
+    private val volumeDetector = DoublePressDetector()
+    private var mediaSession: MediaSession? = null
+
+    /** Nothing was heard within the command window: say so, then go idle. */
     private val commandTimeoutRunnable = Runnable {
-        Log.i(TAG, "Command response window timed out. Resuming normal hotword listening.")
+        Log.i(TAG, "Command window timed out (no speech heard).")
+        isAwaitingUserCommand = false
+        isSpeakingPrompt = true
+        try {
+            speechRecognizer?.cancel()
+            isRecognizing = false
+        } catch (_: Exception) {}
+        if (!speakIris(cfg("didnt_hear", "I didn't hear anything."), "iris_no_input")) {
+            endIrisSession(500L)
+        }
+    }
+
+    /** Safety net: Dart never reported that its reply finished. */
+    private val dartReplyFallbackRunnable = Runnable {
+        Log.w(TAG, "Dart reply did not finish in time; resuming wake-word listening.")
+        endIrisSession(350L)
+    }
+
+    private fun endIrisSession(restartDelayMs: Long) {
+        irisSessionActive = false
         isAwaitingUserCommand = false
         isSpeakingPrompt = false
-        startSpeechRecognizer()
+        mainHandler.removeCallbacks(commandTimeoutRunnable)
+        mainHandler.removeCallbacks(dartReplyFallbackRunnable)
+        scheduleRestart(restartDelayMs)
+    }
+
+    /** Called when Dart finished speaking the command's reply. */
+    fun onIrisReplyDone() {
+        mainHandler.post { if (irisSessionActive) endIrisSession(350L) }
     }
 
     private var textToSpeech: TextToSpeech? = null
@@ -143,29 +237,12 @@ class LostPhoneService : Service() {
 
                         override fun onDone(utteranceId: String?) {
                             Log.i(TAG, "TTS onDone: $utteranceId")
-                            if (utteranceId == "iris_wakeup_prompt") {
-                                // 350ms pause allows speaker acoustic reverberation to clear before mic opens
-                                mainHandler.postDelayed({
-                                    isSpeakingPrompt = false
-                                    isAwaitingUserCommand = true
-                                    mainHandler.removeCallbacks(commandTimeoutRunnable)
-                                    mainHandler.postDelayed(commandTimeoutRunnable, 10000L)
-                                    startSpeechRecognizer()
-                                }, 350L)
-                            }
+                            onIrisUtteranceFinished(utteranceId)
                         }
 
                         override fun onError(utteranceId: String?) {
                             Log.w(TAG, "TTS onError: $utteranceId")
-                            if (utteranceId == "iris_wakeup_prompt") {
-                                mainHandler.postDelayed({
-                                    isSpeakingPrompt = false
-                                    isAwaitingUserCommand = true
-                                    mainHandler.removeCallbacks(commandTimeoutRunnable)
-                                    mainHandler.postDelayed(commandTimeoutRunnable, 10000L)
-                                    startSpeechRecognizer()
-                                }, 350L)
-                            }
+                            onIrisUtteranceFinished(utteranceId)
                         }
                     })
                 } else {
@@ -193,23 +270,47 @@ class LostPhoneService : Service() {
         }
     }
 
-    private fun getHowCanIHelpPrompt(): Pair<String, Locale> {
-        val locale = getPreferredLocale()
-        val text = when (locale.language) {
-            "hi" -> "मैं आपकी क्या मदद करूँ?"
-            "kn" -> "ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?"
-            "te" -> "నేను మీకు ఎలా సహాయం చేయగలను?"
-            "ta" -> "நான் உங்களுக்கு எவ்வாறு உதவ முடியும்?"
-            else -> "How can I help you?"
+    private fun onIrisUtteranceFinished(utteranceId: String?) {
+        when (utteranceId) {
+            // 350ms pause lets speaker reverberation clear before the mic opens
+            "iris_wakeup_prompt" -> mainHandler.postDelayed({ openCommandWindow() }, 350L)
+            "iris_no_input" -> mainHandler.postDelayed({ endIrisSession(0L) }, 350L)
         }
-        return Pair(text, locale)
     }
 
-    private fun speakHowCanIHelpAndListen() {
-        val (prompt, locale) = getHowCanIHelpPrompt()
-        Log.i(TAG, "Speaking prompt: '$prompt' in locale: $locale")
+    /** Mic opens for exactly ONE command, with an 8 second window. */
+    private fun openCommandWindow() {
+        if (!irisSessionActive || !isRunning) return
+        isSpeakingPrompt = false
+        isAwaitingUserCommand = true
+        mainHandler.removeCallbacks(commandTimeoutRunnable)
+        mainHandler.postDelayed(commandTimeoutRunnable, COMMAND_WINDOW_MS)
+        startSpeechRecognizer()
+    }
 
-        // Unmute and elevate media stream volume if low so blind user clearly hears it
+    /** Speaks [text] in the user's language; returns false if TTS is unavailable. */
+    private fun speakIris(text: String, utteranceId: String): Boolean {
+        if (textToSpeech != null && isTtsReady) {
+            try {
+                textToSpeech?.language = getPreferredLocale()
+                val params = Bundle().apply {
+                    putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                }
+                val res = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+                Log.i(TAG, "TTS speak('$text') result: $res")
+                return res == TextToSpeech.SUCCESS
+            } catch (e: Exception) {
+                Log.e(TAG, "TTS speak failed: ${e.message}")
+            }
+        }
+        return false
+    }
+
+    private fun speakYesAndListen() {
+        val prompt = cfg("yes_tell_me", "Yes, tell me.")
+
+        // Unmute and elevate media stream volume if low so a blind user clearly hears it
         try {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
             val currentVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
@@ -221,32 +322,10 @@ class LostPhoneService : Service() {
 
         isSpeakingPrompt = true
         mainHandler.removeCallbacks(restartRunnable)
+        if (speakIris(prompt, "iris_wakeup_prompt")) return
 
-        if (textToSpeech != null && isTtsReady) {
-            try {
-                textToSpeech?.language = locale
-                val params = Bundle().apply {
-                    putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
-                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
-                }
-                val res = textToSpeech?.speak(prompt, TextToSpeech.QUEUE_FLUSH, params, "iris_wakeup_prompt")
-                Log.i(TAG, "TTS speak result: $res")
-                if (res == TextToSpeech.SUCCESS) {
-                    return
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "TTS speak failed: ${e.message}")
-            }
-        }
-
-        // Fallback if TTS engine wasn't ready: pause 1.8s then start listening for reply
-        mainHandler.postDelayed({
-            isSpeakingPrompt = false
-            isAwaitingUserCommand = true
-            mainHandler.removeCallbacks(commandTimeoutRunnable)
-            mainHandler.postDelayed(commandTimeoutRunnable, 10000L)
-            startSpeechRecognizer()
-        }, 1800L)
+        // TTS not ready: wait 1.8s, then listen anyway
+        mainHandler.postDelayed({ openCommandWindow() }, 1800L)
     }
 
     private val restartRunnable = Runnable {
@@ -270,6 +349,7 @@ class LostPhoneService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createNotificationChannel()
         registerBatteryMonitor()
         initTextToSpeech()
@@ -292,7 +372,32 @@ class LostPhoneService : Service() {
                 triggerAlarm("Test Alarm")
                 return START_STICKY
             }
+            ACTION_RING -> {
+                if (isRunning) triggerAlarm("Iris")
+                return START_STICKY
+            }
+            ACTION_TALK -> {
+                if (isRunning) {
+                    beginIrisSession("notification")
+                } else {
+                    stopSelf()
+                }
+                return START_STICKY
+            }
+            ACTION_CONFIG -> {
+                saveIrisConfig(intent?.getBundleExtra(EXTRA_CONFIG))
+                if (isRunning) {
+                    try {
+                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        if (!isAlarmRinging) nm.notify(NOTIFICATION_ID, buildListeningNotification())
+                    } catch (_: Exception) {}
+                } else {
+                    stopSelf()
+                }
+                return START_STICKY
+            }
             ACTION_START -> {
+                saveIrisConfig(intent?.getBundleExtra(EXTRA_CONFIG))
                 timeoutMinutes = intent?.getIntExtra(EXTRA_TIMEOUT_MINUTES, 20)?.coerceIn(5, 60) ?: 20
                 startForegroundServiceMode()
                 return START_STICKY
@@ -345,7 +450,10 @@ class LostPhoneService : Service() {
         mainHandler.removeCallbacks(serviceAutoStopRunnable)
         mainHandler.postDelayed(serviceAutoStopRunnable, timeoutMinutes * 60 * 1000L)
 
-        // 4. Start hotword recognition
+        // 4. Try to receive Volume Up double-presses with the screen off
+        startVolumeSession()
+
+        // 5. Start hotword recognition
         startSpeechRecognizer()
     }
 
@@ -492,60 +600,179 @@ class LostPhoneService : Service() {
     }
 
     private fun stripIrisHotword(phrase: String): String {
-        return phrase
-            .replace(Regex("""(?i)^\s*(hey|hi|ok|okay|hei|hai|ay|a|here|hay)?\s*(iris|irish|ayres|aires|ayris|airis|eris|irus|iras|ires|aris|iriss|it\s+is)\b[:,\s]*"""), "")
-            .replace(Regex("""(?i)^\s*here\s+is\b[:,\s]*"""), "")
-            .replace(Regex("""(?i)^\s*harris\b[:,\s]*"""), "")
-            .replace(Regex("""(?i)^\s*harry\b[:,\s]*"""), "")
-            .replace(Regex("""(?i)^\s*heiress\b[:,\s]*"""), "")
-            .replace(Regex("""(?i)^\s*high\s*risk\b[:,\s]*"""), "")
-            .replace(Regex("""^\s*(हे|हाय|हेलो\s+)?(आइरिस|आयरिस|आईरिस|इरिस)\b[:,\s]*"""), "")
-            .replace(Regex("""^\s*(ಹೇ|ಹಾಯ್\s+)?(ಐರಿಸ್)\b[:,\s]*"""), "")
-            .trim()
+        return try {
+            val prefix = Regex("""^\s*(?:""" + wakeRegex().pattern + """)[:,\s]*""", RegexOption.IGNORE_CASE)
+            phrase.replace(prefix, "").trim()
+        } catch (_: Exception) {
+            phrase.trim()
+        }
     }
 
-    private fun handleIrisWakeup(phrase: String) {
-        Log.i(TAG, "Iris wakeup detected: '$phrase'")
-
-        val cleanedCommand = stripIrisHotword(phrase)
-        val hasDirectCommand = cleanedCommand.isNotEmpty() && cleanedCommand.length >= 3
-
-        // Bring MainActivity to foreground
+    /** Short system beep (no asset) so the user knows Iris is listening. */
+    private fun playListenBeep() {
         try {
-            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra("from_iris_wakeup", true)
-                putExtra("phrase", phrase)
-                putExtra("command", if (hasDirectCommand) cleanedCommand else "")
-            }
-            if (launchIntent != null) {
-                startActivity(launchIntent)
-            }
+            val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
+            tone.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+            mainHandler.postDelayed({ try { tone.release() } catch (_: Exception) {} }, 400L)
         } catch (e: Exception) {
-            Log.e(TAG, "Launch activity error: ${e.message}")
+            Log.w(TAG, "Beep failed: ${e.message}")
         }
+    }
 
-        // 1. Immediately cancel the current speech recognizer pass and mark prompt speaking
-        isSpeakingPrompt = true
+    private fun vibrateOnce() {
+        try {
+            val vibrator = getVibrator()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(80L, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(80L)
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Single entry point for EVERY trigger (wake word, double Volume Up,
+     * notification button, home-screen button). Debounced so one physical
+     * trigger can never start two sessions.
+     *
+     * Flow: beep + vibrate -> pause wake-word loop -> "Yes, tell me" ->
+     * listen for ONE command (8 s) -> deliver to Dart -> idle.
+     */
+    private fun beginIrisSession(source: String, directCommand: String? = null) {
+        if (!isRunning) return
+        if (isAlarmRinging) {
+            // Any trigger while the alarm sounds silences it first.
+            stopAlarm()
+            return
+        }
+        val now = SystemClock.uptimeMillis()
+        if (irisSessionActive || now - lastTriggerMs < TRIGGER_COOLDOWN_MS) {
+            Log.i(TAG, "Iris trigger from '$source' ignored (debounced).")
+            return
+        }
+        lastTriggerMs = now
+        irisSessionActive = true
+        Log.i(TAG, "Iris session started by '$source'")
+
+        // Pause the wake-word loop so the mic never hears the beep or our own voice.
         mainHandler.removeCallbacks(restartRunnable)
+        isSpeakingPrompt = true
+        isAwaitingUserCommand = false
         try {
             speechRecognizer?.cancel()
             isRecognizing = false
         } catch (_: Exception) {}
 
-        if (hasDirectCommand) {
-            Log.i(TAG, "Direct command detected with hotword: '$cleanedCommand'")
-            isSpeakingPrompt = false
-            isAwaitingUserCommand = false
-            eventListener?.onVoiceCommand(cleanedCommand)
-            scheduleRestart(1500)
+        playListenBeep()
+        vibrateOnce()
+        eventListener?.onIrisWakeup(source)
+
+        if (!directCommand.isNullOrEmpty()) {
+            // "Hey Iris, find my bottle": the command was already spoken.
+            deliverCommand(directCommand, launchApp = true)
         } else {
-            // User said "Hey Iris" only -> speak "How can I help you?" via TTS out loud!
-            eventListener?.onIrisWakeup(phrase)
-            speakHowCanIHelpAndListen()
+            // Let the beep finish before speaking.
+            mainHandler.postDelayed({ speakYesAndListen() }, 300L)
         }
+    }
+
+    /** Hands the transcript to Dart and waits (bounded) for its spoken reply to end. */
+    private fun deliverCommand(command: String, launchApp: Boolean) {
+        isAwaitingUserCommand = false
+        isSpeakingPrompt = true
+        mainHandler.removeCallbacks(commandTimeoutRunnable)
+        Log.i(TAG, "Delivering Iris command: '$command'")
+
+        if (launchApp) {
+            try {
+                val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra("from_voice_command", true)
+                    putExtra("command", command)
+                }
+                if (launchIntent != null) startActivity(launchIntent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Launch activity on voice command error: ${e.message}")
+            }
+        }
+
+        pendingCommand = command
+        pendingCommandAtMs = SystemClock.uptimeMillis()
+        eventListener?.onVoiceCommand(command)
+        mainHandler.removeCallbacks(dartReplyFallbackRunnable)
+        mainHandler.postDelayed(dartReplyFallbackRunnable, DART_REPLY_FALLBACK_MS)
+    }
+
+    private fun handleIrisWakeup(phrase: String) {
+        Log.i(TAG, "Iris wakeup detected: '$phrase'")
+        val cleaned = stripIrisHotword(phrase)
+        beginIrisSession("wake_word", if (cleaned.length >= 3) cleaned else null)
+    }
+
+    /** Volume Up pressed (Activity or MediaSession). True when it triggered Iris. */
+    fun onVolumeUpPress(): Boolean {
+        if (!isRunning) return false
+        val triggered = volumeDetector.onPress(SystemClock.uptimeMillis())
+        if (triggered) mainHandler.post { beginIrisSession("volume_double_press") }
+        return triggered
+    }
+
+    /**
+     * Best-effort: an active MediaSession with a remote VolumeProvider lets the
+     * service see Volume keys when the screen is off or the app is in the
+     * background. Some OEM builds do not route keys to it; then only the
+     * in-app, wake-word and notification triggers work. Never fatal.
+     */
+    private fun startVolumeSession() {
+        try {
+            val session = MediaSession(this, "FindItIris")
+            session.setPlaybackState(
+                PlaybackState.Builder()
+                    .setActions(0L)
+                    .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
+                    .build()
+            )
+            session.setPlaybackToRemote(object : VolumeProvider(VOLUME_CONTROL_RELATIVE, 100, 50) {
+                override fun onAdjustVolume(direction: Int) {
+                    mainHandler.post { handleSessionVolumeKey(direction) }
+                }
+            })
+            session.isActive = true
+            mediaSession = session
+            Log.i(TAG, "Volume MediaSession active.")
+        } catch (e: Exception) {
+            Log.w(TAG, "Volume MediaSession unavailable: ${e.message}")
+            mediaSession = null
+        }
+    }
+
+    private fun handleSessionVolumeKey(direction: Int) {
+        if (direction > 0 && isAlarmRinging) {
+            stopAlarm()
+            return
+        }
+        // Keep normal volume behaviour: only a SECOND press within the window triggers Iris.
+        if (direction > 0 && onVolumeUpPress()) return
+        if (direction == 0) return
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            am.adjustSuggestedStreamVolume(
+                if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+                AudioManager.USE_DEFAULT_STREAM_TYPE,
+                AudioManager.FLAG_SHOW_UI
+            )
+        } catch (_: Exception) {}
+    }
+
+    private fun stopVolumeSession() {
+        try {
+            mediaSession?.isActive = false
+            mediaSession?.release()
+        } catch (_: Exception) {}
+        mediaSession = null
     }
 
     private fun checkMatches(matches: ArrayList<String>?, isPartial: Boolean): Boolean {
@@ -565,37 +792,15 @@ class LostPhoneService : Service() {
                 if (!isPartial) {
                     Log.i(TAG, "User command final reply candidate: '$clean'")
                     if (alarmTriggerRegex.containsMatchIn(clean)) {
-                        isAwaitingUserCommand = false
-                        mainHandler.removeCallbacks(commandTimeoutRunnable)
                         Log.i(TAG, "Alarm trigger matched in reply: '$clean'")
                         triggerAlarm(clean)
                         return true
                     }
                     val cmd = stripIrisHotword(clean)
                     // Ensure candidate is NOT just a repeated "Hey Iris"
-                    if (cmd.isNotEmpty() && cmd.length >= 2 && !irisWakeupRegex.matches(clean)) {
-                        isAwaitingUserCommand = false
-                        mainHandler.removeCallbacks(commandTimeoutRunnable)
+                    if (cmd.isNotEmpty() && cmd.length >= 2 && !wakeRegex().matches(clean)) {
                         Log.i(TAG, "Voice command received in reply: '$cmd'")
-
-                        // Bring MainActivity to foreground
-                        try {
-                            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                putExtra("from_voice_command", true)
-                                putExtra("command", cmd)
-                            }
-                            if (launchIntent != null) {
-                                startActivity(launchIntent)
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Launch activity on voice command error: ${e.message}")
-                        }
-
-                        eventListener?.onVoiceCommand(cmd)
-                        scheduleRestart(1500)
+                        deliverCommand(cmd, launchApp = true)
                         return true
                     }
                 }
@@ -604,7 +809,8 @@ class LostPhoneService : Service() {
                     Log.i(TAG, "Alarm trigger matched by candidate: '$clean'")
                     triggerAlarm(clean)
                     return true
-                } else if (irisWakeupRegex.containsMatchIn(clean)) {
+                } else if (!isPartial && wakeRegex().containsMatchIn(clean)) {
+                    // Final results only: a partial "hey iris find my" would cut the command short.
                     Log.i(TAG, "Iris hotword detected by candidate: '$clean'")
                     handleIrisWakeup(clean)
                     return true
@@ -624,6 +830,13 @@ class LostPhoneService : Service() {
     private fun triggerAlarm(phrase: String) {
         if (isAlarmRinging) return
         isAlarmRinging = true
+
+        // An alarm ends any Iris session in progress.
+        irisSessionActive = false
+        isAwaitingUserCommand = false
+        isSpeakingPrompt = false
+        mainHandler.removeCallbacks(commandTimeoutRunnable)
+        mainHandler.removeCallbacks(dartReplyFallbackRunnable)
 
         // 1. Stop speech listener briefly for audio initialization
         try {
@@ -799,11 +1012,27 @@ class LostPhoneService : Service() {
             Notification.Builder(this)
         }
 
-        builder.setContentTitle("FindIt: Lost Phone Mode Active")
-            .setContentText("Listening for \"Hey Iris\" (auto-off in $timeoutMinutes min)...")
+        val talkIntent = Intent(this, LostPhoneService::class.java).apply {
+            action = ACTION_TALK
+        }
+        val pendingTalk = PendingIntent.getService(
+            this,
+            3,
+            talkIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val howTo = cfg(
+            "notif_text",
+            "Say \"Hey Iris\", double-press Volume Up, or tap Talk to Iris. Auto-off in $timeoutMinutes min."
+        )
+
+        builder.setContentTitle("FindIt: Iris is on")
+            .setContentText(howTo)
+            .setStyle(Notification.BigTextStyle().bigText(howTo))
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingOpen)
             .setOngoing(true)
+            .addAction(android.R.drawable.ic_btn_speak_now, cfg("talk_action", "Talk to Iris"), pendingTalk)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "STOP", pendingStop)
 
         return builder.build()
@@ -867,7 +1096,10 @@ class LostPhoneService : Service() {
         isAlarmRinging = false
         isSpeakingPrompt = false
         isAwaitingUserCommand = false
+        irisSessionActive = false
+        instance = null
         mainHandler.removeCallbacksAndMessages(null)
+        stopVolumeSession()
 
         stopAlarm()
 

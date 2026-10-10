@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
-import '../services/assistant_service.dart';
 import '../services/localization_service.dart';
 import '../services/lost_phone_service.dart';
 import '../services/settings_service.dart';
 import '../services/speech_service.dart';
 import '../theme/app_theme.dart';
-import 'finder_screen.dart';
 
 /// Screen for managing Lost Phone Mode.
 ///
@@ -32,7 +30,6 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
   StreamSubscription<String>? _triggerSub;
   StreamSubscription<void>? _stopSub;
   StreamSubscription<String>? _irisWakeupSub;
-  StreamSubscription<String>? _commandSub;
   StreamSubscription<String>? _errorSub;
 
   @override
@@ -61,42 +58,7 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
       // Prompt is voiced natively by LostPhoneService to avoid audio collisions
     });
 
-    _commandSub = _lostPhone.onVoiceCommand.listen((command) async {
-      if (!mounted) return;
-      final lang = SettingsService.instance.preferredLanguage;
-      final res = await AssistantService.instance.processUserInput(command, language: lang);
-
-      if (res.isUnsupported) {
-        final msg = res.spokenReply ?? LocalizationService.instance.unsupportedObject(lang);
-        _speech.speak(msg, urgent: true);
-        return;
-      }
-
-      if (res.intent == AssistantIntent.findObject && res.target != null) {
-        final phrase = LocalizationService.instance.searchingTarget(
-          res.target!,
-          lang,
-        );
-        _speech.speak(phrase, urgent: true);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => FinderScreen(initialTarget: res.target!),
-          ),
-        );
-        return;
-      }
-
-      if (res.intent == AssistantIntent.lostPhone) {
-        final phrase = LocalizationService.instance.lostPhoneAlert(lang);
-        _speech.speak(phrase, urgent: true);
-        return;
-      }
-
-      if (res.spokenReply != null) {
-        _speech.speak(res.spokenReply!, urgent: true);
-      }
-    });
+    // Voice commands are executed centrally by IrisController.
 
     _errorSub = _lostPhone.onErrorOccurred.listen((error) {
       if (mounted) {
@@ -116,7 +78,6 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
     _triggerSub?.cancel();
     _stopSub?.cancel();
     _irisWakeupSub?.cancel();
-    _commandSub?.cancel();
     _errorSub?.cancel();
     _speech.stop();
     super.dispose();
@@ -129,7 +90,11 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         if (success) {
-          _speech.speak('Lost Phone Mode disabled. Microphone turned off.');
+          final lang = SettingsService.instance.preferredLanguage;
+          _speech.speak(
+            LocalizationService.instance.irisDisarmed(lang),
+            urgent: true,
+          );
         }
       }
     } else {
@@ -139,8 +104,9 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         if (success) {
+          final lang = SettingsService.instance.preferredLanguage;
           _speech.speak(
-            'Lost Phone Mode active. Listening for Hey Iris. Auto shut off in $_selectedTimeout minutes.',
+            LocalizationService.instance.irisArmed(_selectedTimeout, lang),
             urgent: true,
           );
         } else if (_lostPhone.lastError != null) {
@@ -283,7 +249,9 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
                               ),
                               const SizedBox(width: 10),
                               Text(
-                                isRunning ? 'MODE ACTIVE' : 'MODE DISABLED',
+                                isRunning
+                                    ? LocalizationService.instance.irisStatusOn(SettingsService.instance.preferredLanguage)
+                                    : LocalizationService.instance.irisStatusOff(SettingsService.instance.preferredLanguage),
                                 style: TextStyle(
                                   color: isRunning
                                       ? AppTheme.success
@@ -323,7 +291,7 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
                       const SizedBox(height: 8),
                       Text(
                         isRunning
-                            ? 'A persistent notification is running. If you misplace your phone, say "Hey Iris" or "Find my phone" to sound the loud alert.'
+                            ? 'A persistent notification is running. Trigger Iris by saying "Hey Iris", by double-pressing Volume Up, or with the "Talk to Iris" button in the notification. Then say "find my bottle", "where are you", "battery" or "time".'
                             : 'To prevent battery drain and preserve privacy, the microphone is kept OFF during normal app use. Turn this mode on before setting your phone down.',
                         style: const TextStyle(
                           color: AppTheme.textSecondary,
@@ -350,8 +318,8 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
                           ),
                           child: Text(
                             isRunning
-                                ? 'TURN OFF LOST PHONE MODE'
-                                : 'ENABLE LOST PHONE MODE',
+                                ? 'TURN IRIS OFF'
+                                : 'TURN IRIS ON',
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
@@ -511,7 +479,8 @@ class _LostPhoneScreenState extends State<LostPhoneScreen> {
                       ),
                       SizedBox(height: 10),
                       Text(
-                        '• Trigger phrases: "Hey Iris", "Iris", or "Find my phone".\n'
+                        '• Triggers: say "Hey Iris", double-press Volume Up (also with the screen off, where the phone allows it), or tap "Talk to Iris" in the notification or on the home screen.\n'
+                        '• Commands: find an object, "where are you" (rings the phone), stop, battery, time.\n'
                         '• Compliant Foreground Service: Uses an official Android microphone foreground service with a persistent status notification.\n'
                         '• Background Restrictions: On Android 14+ / 16, OEM battery savers (like Funtouch/Vivo/Xiaomi) may suspend background audio if the phone enters deep sleep (Doze mode). For maximum reliability, leave FindIt open before stepping away.',
                         style: TextStyle(
